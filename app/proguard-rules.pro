@@ -1,0 +1,2 @@
+-keep class com.endroid.codecanva.** { *; }
+-dontwarn kotlinx.**
