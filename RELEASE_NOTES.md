@@ -1,3 +1,3 @@
-## Code Canva 1.2.1
+## Code Canva 1.2.2
 
-- Fix horizontal scroll: follow the **current line** end; **reset to the left** when a new line starts (so long lines and the next line both look correct in the video)
+- Fix long-line horizontal scroll again: follow the current line as it grows; reset to the left only when a new line starts (layout-aware, no stale maxValue clamp)
