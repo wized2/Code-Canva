@@ -1,8 +1,9 @@
-## Code Canva 1.0.0
+## Code Canva 1.1.0
 
-First release:
-
-- Type-out animation (char / word / line) with speed control
-- Syntax highlighting (shared approach with CodeCanvas)
-- HTML preview (WebView)
-- Optional MediaProjection recording → Movies/CodeCanva
+- **Full-screen theater** on Start: code-editor chrome, watch-only (no editing)
+- **Android back / gesture** leaves theater or preview correctly
+- **Preview** is full-screen with top back bar
+- **Theme** (System / Dark / Light / Amoled) before start
+- **Video quality** Low → Ultra when recording is enabled
+- **REC overlay** with stop control (visible in the recording)
+- Immersive mode + own-content virtual display to avoid system bars / other apps when the OS allows
