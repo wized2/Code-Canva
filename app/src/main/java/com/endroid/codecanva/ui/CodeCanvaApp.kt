@@ -44,6 +44,13 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -290,14 +297,33 @@ private fun TheaterScreen(
     val vScroll = rememberScrollState()
     val hScroll = rememberScrollState()
     val gutterScroll = rememberScrollState()
+    val textMeasurer = rememberTextMeasurer()
+    var viewportWidthPx by remember { mutableIntStateOf(0) }
 
-    // Keep long lines in frame for the video — scroll right as the current line grows
-    LaunchedEffect(text) {
-        hScroll.animateScrollTo(hScroll.maxValue)
+    // Vertical: always follow the bottom (latest line).
+    // Horizontal: follow the END of the *current* line only.
+    // When a new line starts, jump back to x=0 so the video shows the start of that line.
+    LaunchedEffect(text, state.fontSize, viewportWidthPx) {
         vScroll.animateScrollTo(vScroll.maxValue)
-        gutterScroll.animateScrollTo(gutterScroll.maxValue)
+        gutterScroll.scrollTo(vScroll.value)
+
+        val currentLine = text.substringAfterLast('\n')
+        // New empty line after \n → hard reset to left
+        if (text.endsWith("\n") || currentLine.isEmpty()) {
+            hScroll.animateScrollTo(0)
+            return@LaunchedEffect
+        }
+        val measured = textMeasurer.measure(
+            text = currentLine,
+            style = mono,
+            softWrap = false,
+            maxLines = 1,
+        ).size.width
+        // Scroll so the caret (end of current line) stays in view; 0 when line still fits
+        val target = (measured - viewportWidthPx + 24).coerceAtLeast(0)
+        val clamped = target.coerceAtMost(hScroll.maxValue.coerceAtLeast(0))
+        hScroll.animateScrollTo(clamped)
     }
-    // Sync vertical gutter with code
     LaunchedEffect(vScroll.value) {
         gutterScroll.scrollTo(vScroll.value)
     }
@@ -378,6 +404,7 @@ private fun TheaterScreen(
                 modifier = Modifier
                     .weight(1f)
                     .padding(top = 14.dp, end = 14.dp, bottom = 14.dp)
+                    .onSizeChanged { viewportWidthPx = it.width }
                     .horizontalScroll(hScroll)
                     .verticalScroll(vScroll),
             )
