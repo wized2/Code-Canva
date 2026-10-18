@@ -24,10 +24,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -275,9 +271,7 @@ private fun TheaterScreen(
                         .padding(horizontal = 8.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
-                    }
+                    OutlinedButton(onClick = onBack) { Text("Back") }
                     Column(Modifier.weight(1f)) {
                         Text("main.${state.language.extensions.firstOrNull() ?: "txt"}", fontWeight = FontWeight.Medium)
                         Text(
@@ -291,9 +285,7 @@ private fun TheaterScreen(
                         )
                     }
                     if (state.finished || state.visible.isNotEmpty()) {
-                        IconButton(onClick = onOpenPreview) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = "Preview")
-                        }
+                        OutlinedButton(onClick = onOpenPreview) { Text("Run") }
                     }
                 }
             }
@@ -375,12 +367,7 @@ private fun TheaterScreen(
                             .background(Color.White),
                     )
                     Text("REC", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                    IconButton(
-                        onClick = onStopRecording,
-                        modifier = Modifier.size(32.dp),
-                    ) {
-                        Icon(Icons.Default.Stop, contentDescription = "Stop recording", tint = Color.White)
-                    }
+                    Button(onClick = onStopRecording) { Text("Stop", color = Color.White) }
                 }
             }
         }
@@ -397,9 +384,7 @@ private fun PreviewScreen(html: String, onBack: () -> Unit) {
             TopAppBar(
                 title = { Text("Preview") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
-                    }
+                    OutlinedButton(onClick = onBack) { Text("Back") }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = scheme.surface),
             )
