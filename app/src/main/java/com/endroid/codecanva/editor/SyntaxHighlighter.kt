@@ -109,6 +109,9 @@ object SyntaxHighlighter {
         }
 
         val colors = if (isDark) darkColors else lightColors
+        if (language == Language.HTML || language == Language.XML) {
+            return highlightMarkup(text, colors, language == Language.HTML)
+        }
         val keywords = when (language) {
             Language.KOTLIN -> kotlinKeywords
             Language.JAVA, Language.C -> javaKeywords

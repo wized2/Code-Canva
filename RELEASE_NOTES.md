@@ -1,9 +1,10 @@
-## Code Canva 1.1.0
+## Code Canva 1.2.0
 
-- **Full-screen theater** on Start: code-editor chrome, watch-only (no editing)
-- **Android back / gesture** leaves theater or preview correctly
-- **Preview** is full-screen with top back bar
-- **Theme** (System / Dark / Light / Amoled) before start
-- **Video quality** Low → Ultra when recording is enabled
-- **REC overlay** with stop control (visible in the recording)
-- Immersive mode + own-content virtual display to avoid system bars / other apps when the OS allows
+- Signed release builds (persistent keystore)
+- Full-screen theater: **Back** + **Run** icons only (no pause chrome)
+- Recording starts on **Start** (not when enabling the toggle); stops on theater **Back**
+- No REC overlay in the video
+- HTML language highlight with embedded JS + CSS
+- Long lines scroll horizontally (no wrap) and auto-follow for recording
+- Fern-style seed color presets + theme modes
+- Preview: single Back icon; system back / gesture supported

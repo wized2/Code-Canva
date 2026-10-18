@@ -1,28 +1,26 @@
 package com.endroid.codecanva.editor
 
-enum class Language(val displayName: String, val extensions: List<String>) {
-    PLAIN("Plain Text", listOf("txt", "text", "log")),
+enum class Language(
+    val displayName: String,
+    val extensions: List<String>,
+) {
+    HTML("HTML", listOf("html", "htm")),
     KOTLIN("Kotlin", listOf("kt", "kts")),
     JAVA("Java", listOf("java")),
-    XML("XML", listOf("xml", "html", "htm", "svg")),
-    JSON("JSON", listOf("json")),
-    JAVASCRIPT("JavaScript", listOf("js", "mjs", "cjs")),
+    PYTHON("Python", listOf("py")),
+    JAVASCRIPT("JavaScript", listOf("js", "mjs")),
     TYPESCRIPT("TypeScript", listOf("ts", "tsx")),
-    PYTHON("Python", listOf("py", "pyw")),
-    MARKDOWN("Markdown", listOf("md", "markdown")),
+    JSON("JSON", listOf("json")),
+    XML("XML", listOf("xml")),
+    C("C/C++", listOf("c", "cpp", "h", "hpp")),
     SQL("SQL", listOf("sql")),
-    CSS("CSS", listOf("css", "scss")),
-    SHELL("Shell", listOf("sh", "bash", "zsh")),
-    C("C/C++", listOf("c", "cpp", "h", "hpp", "cc")),
-    RUST("Rust", listOf("rs")),
-    GO("Go", listOf("go")),
-    YAML("YAML", listOf("yml", "yaml")),
-    TOML("TOML", listOf("toml"));
+    PLAIN("Plain", listOf("txt", "md")),
+    ;
 
     companion object {
         fun fromFileName(name: String): Language {
             val ext = name.substringAfterLast('.', "").lowercase()
-            return entries.find { ext in it.extensions } ?: PLAIN
+            return entries.firstOrNull { ext in it.extensions } ?: PLAIN
         }
     }
 }

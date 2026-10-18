@@ -4,7 +4,6 @@ import android.app.Activity
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import android.os.Bundle
-import android.view.View
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -12,8 +11,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -28,11 +25,13 @@ import com.endroid.codecanva.ui.AppScreen
 import com.endroid.codecanva.ui.AppThemeMode
 import com.endroid.codecanva.ui.CanvaViewModel
 import com.endroid.codecanva.ui.CodeCanvaApp
-import com.endroid.codecanva.ui.VideoQuality
+import com.endroid.codecanva.ui.theme.colorSchemeFromSeed
 
 class MainActivity : ComponentActivity() {
 
     private val vm: CanvaViewModel by viewModels()
+    /** When true, projection result should start typing after recorder starts. */
+    private var startAfterProjection = false
 
     private val projectionLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -46,7 +45,12 @@ class MainActivity : ComponentActivity() {
                 }
                 ContextCompat.startForegroundService(this, intent)
                 vm.onRecordingStarted()
+                if (startAfterProjection) {
+                    startAfterProjection = false
+                    vm.startTyping()
+                }
             } else {
+                startAfterProjection = false
                 vm.onRecordingDenied()
             }
         }
@@ -63,22 +67,12 @@ class MainActivity : ComponentActivity() {
                 AppThemeMode.DARK, AppThemeMode.AMOLED -> true
                 AppThemeMode.LIGHT -> false
             }
-            val amoled = state.themeMode == AppThemeMode.AMOLED
-            val scheme = if (dark) {
-                darkColorScheme(
-                    primary = Color(0xFFB39DFF),
-                    secondary = Color(0xFF80CBC4),
-                    surface = if (amoled) Color.Black else Color(0xFF121212),
-                    background = if (amoled) Color.Black else Color(0xFF0D0D0D),
-                )
-            } else {
-                lightColorScheme(
-                    primary = Color(0xFF5E35B1),
-                    secondary = Color(0xFF00897B),
-                )
+            val seed = Color(state.seedColorArgb)
+            var scheme = colorSchemeFromSeed(seed, dark)
+            if (state.themeMode == AppThemeMode.AMOLED) {
+                scheme = scheme.copy(background = Color.Black, surface = Color.Black)
             }
 
-            // Immersive in theater so recording / UI hide system action bars as much as possible
             SideEffect {
                 val immersive = state.screen == AppScreen.THEATER
                 val controller = WindowInsetsControllerCompat(window, window.decorView)
@@ -105,30 +99,31 @@ class MainActivity : ComponentActivity() {
                     onSpeedChange = vm::setSpeedCps,
                     onModeChange = vm::setMode,
                     onRecordToggle = { enabled ->
-                        if (enabled) requestRecording()
-                        else stopRecording()
+                        // Preference only — does not start capture yet
                         vm.setRecordEnabled(enabled)
                     },
                     onThemeMode = vm::setThemeMode,
+                    onSeedColor = vm::setSeedColor,
                     onVideoQuality = vm::setVideoQuality,
                     onStart = {
-                        // If record was requested but projection not yet running, still start typing
-                        vm.startTyping()
+                        if (state.recordEnabled && !state.recording) {
+                            startAfterProjection = true
+                            requestRecording()
+                        } else {
+                            vm.startTyping()
+                        }
                     },
-                    onPause = vm::pauseTyping,
                     onReset = {
                         stopRecording()
                         vm.reset()
                     },
                     onOpenPreview = vm::openPreview,
                     onBackTheater = {
+                        // Stop recording only when leaving theater via Back
                         stopRecording()
                         vm.backFromTheater()
                     },
                     onBackPreview = vm::backFromPreview,
-                    onStopRecording = {
-                        stopRecording()
-                    },
                     onFontSize = vm::setFontSize,
                 )
             }

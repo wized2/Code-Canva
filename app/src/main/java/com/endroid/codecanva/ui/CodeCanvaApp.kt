@@ -7,6 +7,8 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,7 +29,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -42,19 +43,24 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.endroid.codecanva.R
 import com.endroid.codecanva.editor.Language
 import com.endroid.codecanva.editor.SyntaxHighlighter
+import com.endroid.codecanva.ui.theme.PresetSeedColors
 
 @Composable
 fun CodeCanvaApp(
@@ -65,14 +71,13 @@ fun CodeCanvaApp(
     onModeChange: (TypeMode) -> Unit,
     onRecordToggle: (Boolean) -> Unit,
     onThemeMode: (AppThemeMode) -> Unit,
+    onSeedColor: (Int) -> Unit,
     onVideoQuality: (VideoQuality) -> Unit,
     onStart: () -> Unit,
-    onPause: () -> Unit,
     onReset: () -> Unit,
     onOpenPreview: () -> Unit,
     onBackTheater: () -> Unit,
     onBackPreview: () -> Unit,
-    onStopRecording: () -> Unit,
     onFontSize: (Float) -> Unit,
 ) {
     when (state.screen) {
@@ -84,6 +89,7 @@ fun CodeCanvaApp(
             onModeChange = onModeChange,
             onRecordToggle = onRecordToggle,
             onThemeMode = onThemeMode,
+            onSeedColor = onSeedColor,
             onVideoQuality = onVideoQuality,
             onStart = onStart,
             onOpenPreview = onOpenPreview,
@@ -92,21 +98,11 @@ fun CodeCanvaApp(
         )
         AppScreen.THEATER -> {
             BackHandler { onBackTheater() }
-            TheaterScreen(
-                state = state,
-                onPause = onPause,
-                onResume = onStart,
-                onOpenPreview = onOpenPreview,
-                onBack = onBackTheater,
-                onStopRecording = onStopRecording,
-            )
+            TheaterScreen(state = state, onBack = onBackTheater, onRun = onOpenPreview)
         }
         AppScreen.PREVIEW -> {
             BackHandler { onBackPreview() }
-            PreviewScreen(
-                html = state.source,
-                onBack = onBackPreview,
-            )
+            PreviewScreen(html = state.source, onBack = onBackPreview)
         }
     }
 }
@@ -121,6 +117,7 @@ private fun SetupScreen(
     onModeChange: (TypeMode) -> Unit,
     onRecordToggle: (Boolean) -> Unit,
     onThemeMode: (AppThemeMode) -> Unit,
+    onSeedColor: (Int) -> Unit,
     onVideoQuality: (VideoQuality) -> Unit,
     onStart: () -> Unit,
     onOpenPreview: () -> Unit,
@@ -135,7 +132,7 @@ private fun SetupScreen(
                     Column {
                         Text("Code Canva", fontWeight = FontWeight.SemiBold)
                         Text(
-                            "Configure, then Start for full-screen type-out",
+                            "Type-out · preview · optional record",
                             style = MaterialTheme.typography.labelSmall,
                             color = scheme.onSurfaceVariant,
                         )
@@ -149,10 +146,11 @@ private fun SetupScreen(
             Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 12.dp)
+                .padding(horizontal = 14.dp)
                 .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Text("Theme", style = MaterialTheme.typography.labelMedium)
+            SectionLabel("Appearance")
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 AppThemeMode.entries.forEach { m ->
                     FilterChip(
@@ -162,10 +160,31 @@ private fun SetupScreen(
                     )
                 }
             }
-            Spacer(Modifier.height(8.dp))
-            Text("Speed (${state.speedCps.toInt()} /s)", style = MaterialTheme.typography.labelMedium)
-            Slider(value = state.speedCps, onValueChange = onSpeedChange, valueRange = 4f..90f)
-            Text("Type mode", style = MaterialTheme.typography.labelMedium)
+            Text("Color seed", style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant)
+            Row(
+                Modifier.horizontalScroll(rememberScrollState()).padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                PresetSeedColors.forEach { c ->
+                    val selected = state.seedColorArgb == c.toArgbCompat()
+                    Box(
+                        Modifier
+                            .size(if (selected) 36.dp else 30.dp)
+                            .clip(CircleShape)
+                            .background(c)
+                            .then(
+                                if (selected) Modifier.border(2.dp, scheme.onSurface, CircleShape)
+                                else Modifier.border(1.dp, scheme.outlineVariant, CircleShape),
+                            )
+                            .clickable { onSeedColor(c.toArgbCompat()) },
+                    )
+                }
+            }
+
+            SectionLabel("Typing")
+            Text("Speed  ${state.speedCps.toInt()}/s", style = MaterialTheme.typography.labelMedium)
+            Slider(value = state.speedCps, onValueChange = onSpeedChange, valueRange = 8f..80f)
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TypeMode.entries.forEach { m ->
                     FilterChip(
@@ -175,10 +194,8 @@ private fun SetupScreen(
                     )
                 }
             }
-            Spacer(Modifier.height(8.dp))
-            Text("Language highlight", style = MaterialTheme.typography.labelMedium)
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(Language.XML, Language.KOTLIN, Language.JAVASCRIPT, Language.PYTHON, Language.JSON, Language.PLAIN).forEach { lang ->
+                listOf(Language.HTML, Language.KOTLIN, Language.JAVASCRIPT, Language.PYTHON, Language.JSON, Language.PLAIN).forEach { lang ->
                     FilterChip(
                         selected = state.language == lang,
                         onClick = { onLanguageChange(lang) },
@@ -186,13 +203,22 @@ private fun SetupScreen(
                     )
                 }
             }
-            Spacer(Modifier.height(8.dp))
+            Text("Font size", style = MaterialTheme.typography.labelMedium)
+            Slider(value = state.fontSize, onValueChange = onFontSize, valueRange = 12f..22f)
+
+            SectionLabel("Recording")
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Record session", modifier = Modifier.weight(1f))
+                Column(Modifier.weight(1f)) {
+                    Text("Record after Start")
+                    Text(
+                        "Starts when you press Start. Stops when you leave the editor (Back).",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = scheme.onSurfaceVariant,
+                    )
+                }
                 Switch(checked = state.recordEnabled, onCheckedChange = onRecordToggle)
             }
             if (state.recordEnabled) {
-                Text("Video quality", style = MaterialTheme.typography.labelMedium)
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     VideoQuality.entries.forEach { q ->
                         FilterChip(
@@ -202,50 +228,55 @@ private fun SetupScreen(
                         )
                     }
                 }
-                Text(
-                    "Records this app only (immersive). A stop control is overlaid in the video.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = scheme.onSurfaceVariant,
-                )
             }
-            Spacer(Modifier.height(8.dp))
-            Text("Font size", style = MaterialTheme.typography.labelMedium)
-            Slider(value = state.fontSize, onValueChange = onFontSize, valueRange = 12f..24f)
-            Spacer(Modifier.height(8.dp))
+
+            SectionLabel("Source")
             OutlinedTextField(
                 value = state.source,
                 onValueChange = onSourceChange,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(220.dp),
+                modifier = Modifier.fillMaxWidth().height(200.dp),
                 textStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp),
-                label = { Text("Source (HTML / code)") },
+                shape = RoundedCornerShape(16.dp),
             )
-            if (!state.status.isNullOrBlank()) {
-                Text(state.status!!, color = scheme.primary, style = MaterialTheme.typography.bodySmall)
+            state.status?.let {
+                Text(it, color = scheme.error, style = MaterialTheme.typography.bodySmall)
             }
-            Spacer(Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onStart, enabled = state.source.isNotBlank()) { Text("Start") }
-                OutlinedButton(onClick = onOpenPreview, enabled = state.source.isNotBlank()) { Text("Preview") }
-                OutlinedButton(onClick = onReset) { Text("Reset") }
+            Spacer(Modifier.height(4.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(
+                    onClick = onStart,
+                    enabled = state.source.isNotBlank(),
+                    shape = RoundedCornerShape(14.dp),
+                ) { Text("Start") }
+                OutlinedButton(onClick = onOpenPreview, enabled = state.source.isNotBlank(), shape = RoundedCornerShape(14.dp)) {
+                    Text("Preview")
+                }
+                OutlinedButton(onClick = onReset, shape = RoundedCornerShape(14.dp)) { Text("Reset") }
             }
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(28.dp))
         }
     }
 }
 
 @Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(top = 8.dp),
+    )
+}
+
+@Composable
 private fun TheaterScreen(
     state: CanvaUiState,
-    onPause: () -> Unit,
-    onResume: () -> Unit,
-    onOpenPreview: () -> Unit,
     onBack: () -> Unit,
-    onStopRecording: () -> Unit,
+    onRun: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
-    val text = if (state.visible.isNotEmpty()) state.visible else ""
+    val text = state.visible
     val isDark = scheme.background.luminance() < 0.5f
     val highlighted = remember(text, state.language, isDark) {
         SyntaxHighlighter.highlight(text, state.language, isDark)
@@ -254,122 +285,102 @@ private fun TheaterScreen(
         fontFamily = FontFamily.Monospace,
         fontSize = state.fontSize.sp,
         color = scheme.onSurface,
-        lineHeight = (state.fontSize * 1.45f).sp,
+        lineHeight = (state.fontSize * 1.5f).sp,
     )
+    val vScroll = rememberScrollState()
+    val hScroll = rememberScrollState()
+    val gutterScroll = rememberScrollState()
 
-    Box(
+    // Keep long lines in frame for the video — scroll right as the current line grows
+    LaunchedEffect(text) {
+        hScroll.animateScrollTo(hScroll.maxValue)
+        vScroll.animateScrollTo(vScroll.maxValue)
+        gutterScroll.animateScrollTo(gutterScroll.maxValue)
+    }
+    // Sync vertical gutter with code
+    LaunchedEffect(vScroll.value) {
+        gutterScroll.scrollTo(vScroll.value)
+    }
+
+    Column(
         Modifier
             .fillMaxSize()
-            .background(scheme.background),
+            .background(scheme.background)
+            .statusBarsPadding(),
     ) {
-        Column(Modifier.fillMaxSize().statusBarsPadding()) {
-            // Editor chrome (looks like IDE, not system bars)
-            Surface(color = scheme.surface, tonalElevation = 2.dp) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    OutlinedButton(onClick = onBack) { Text("Back") }
-                    Column(Modifier.weight(1f)) {
-                        Text("main.${state.language.extensions.firstOrNull() ?: "txt"}", fontWeight = FontWeight.Medium)
-                        Text(
-                            when {
-                                state.running -> "Typing…"
-                                state.finished -> "Finished"
-                                else -> "Paused"
-                            },
-                            style = MaterialTheme.typography.labelSmall,
-                            color = scheme.onSurfaceVariant,
-                        )
-                    }
-                    if (state.finished || state.visible.isNotEmpty()) {
-                        OutlinedButton(onClick = onOpenPreview) { Text("Run") }
-                    }
-                }
-            }
-            if (state.running || state.progress > 0f) {
-                LinearProgressIndicator(
-                    progress = { state.progress },
-                    modifier = Modifier.fillMaxWidth().height(3.dp),
-                )
-            }
-            // Read-only code area
-            Row(
-                Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .background(scheme.surfaceVariant.copy(alpha = 0.25f)),
-            ) {
-                // Line numbers
-                val lines = text.count { it == '\n' } + 1
-                val gutter = remember(lines) {
-                    (1..lines).joinToString("\n") { it.toString() }
-                }
-                Text(
-                    gutter,
-                    style = mono.copy(color = scheme.onSurfaceVariant.copy(alpha = 0.45f), fontSize = (state.fontSize * 0.9f).sp),
-                    modifier = Modifier
-                        .padding(start = 8.dp, top = 12.dp, end = 8.dp)
-                        .verticalScroll(rememberScrollState()),
-                )
-                Text(
-                    text = highlighted,
-                    style = mono,
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(top = 12.dp, end = 12.dp)
-                        .verticalScroll(rememberScrollState())
-                        .horizontalScroll(rememberScrollState()),
-                )
-            }
-            // Bottom controls (minimal)
+        Surface(color = scheme.surface, tonalElevation = 1.dp) {
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .background(scheme.surface)
-                    .padding(10.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    .padding(horizontal = 4.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (state.running) {
-                    OutlinedButton(onClick = onPause) { Text("Pause") }
-                } else if (!state.finished) {
-                    Button(onClick = onResume) { Text("Resume") }
+                IconButton(onClick = onBack) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_back),
+                        contentDescription = "Back",
+                        tint = scheme.onSurface,
+                    )
                 }
-                if (state.finished) {
-                    Button(onClick = onOpenPreview) { Text("Preview") }
-                    OutlinedButton(onClick = onBack) { Text("Done") }
+                Text(
+                    when (state.language) {
+                        Language.HTML -> "index.html"
+                        Language.KOTLIN -> "Main.kt"
+                        Language.JAVASCRIPT -> "main.js"
+                        Language.PYTHON -> "main.py"
+                        Language.JSON -> "data.json"
+                        else -> "file.txt"
+                    },
+                    modifier = Modifier.weight(1f),
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                IconButton(onClick = onRun) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_play),
+                        contentDescription = "Run preview",
+                        tint = scheme.primary,
+                    )
                 }
             }
         }
-
-        // Recording stop overlay — appears in the video
-        if (state.recording || state.recordEnabled) {
-            Surface(
+        if (state.running && state.progress < 1f) {
+            LinearProgressIndicator(
+                progress = { state.progress },
+                modifier = Modifier.fillMaxWidth().height(2.dp),
+            )
+        }
+        Row(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .background(scheme.surfaceVariant.copy(alpha = 0.2f)),
+        ) {
+            val lines = if (text.isEmpty()) 1 else text.count { it == '\n' } + 1
+            val gutter = remember(lines) { (1..lines).joinToString("\n") { it.toString() } }
+            Text(
+                gutter,
+                style = mono.copy(
+                    color = scheme.onSurfaceVariant.copy(alpha = 0.4f),
+                    fontSize = (state.fontSize * 0.85f).sp,
+                ),
                 modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .statusBarsPadding()
-                    .padding(top = 56.dp, end = 12.dp),
-                shape = RoundedCornerShape(24.dp),
-                color = Color(0xCCB71C1C),
-                shadowElevation = 6.dp,
-            ) {
-                Row(
-                    Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Box(
-                        Modifier
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(Color.White),
-                    )
-                    Text("REC", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                    Button(onClick = onStopRecording) { Text("Stop", color = Color.White) }
-                }
-            }
+                    .padding(start = 10.dp, top = 14.dp, end = 8.dp)
+                    .verticalScroll(gutterScroll, enabled = false),
+            )
+            // softWrap = false so long lines stay one line; horizontal scroll reveals them
+            Text(
+                text = highlighted,
+                style = mono,
+                softWrap = false,
+                maxLines = Int.MAX_VALUE,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(top = 14.dp, end = 14.dp, bottom = 14.dp)
+                    .horizontalScroll(hScroll)
+                    .verticalScroll(vScroll),
+            )
         }
     }
 }
@@ -384,7 +395,13 @@ private fun PreviewScreen(html: String, onBack: () -> Unit) {
             TopAppBar(
                 title = { Text("Preview") },
                 navigationIcon = {
-                    OutlinedButton(onClick = onBack) { Text("Back") }
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_back),
+                            contentDescription = "Back",
+                            tint = scheme.onSurface,
+                        )
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = scheme.surface),
             )
@@ -411,8 +428,16 @@ private fun PreviewScreen(html: String, onBack: () -> Unit) {
 
 private fun Color.luminance(): Float {
     fun c(v: Float): Float {
-        val x = if (v <= 0.03928f) v / 12.92f else Math.pow(((v + 0.055) / 1.055).toDouble(), 2.4).toFloat()
-        return x
+        return if (v <= 0.03928f) v / 12.92f
+        else Math.pow(((v + 0.055) / 1.055).toDouble(), 2.4).toFloat()
     }
     return 0.2126f * c(red) + 0.7152f * c(green) + 0.0722f * c(blue)
 }
+
+private fun Color.toArgbCompat(): Int =
+    android.graphics.Color.argb(
+        (alpha * 255).toInt(),
+        (red * 255).toInt(),
+        (green * 255).toInt(),
+        (blue * 255).toInt(),
+    )

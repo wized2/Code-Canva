@@ -1,8 +1,11 @@
 package com.endroid.codecanva.ui
 
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.endroid.codecanva.editor.Language
+import com.endroid.codecanva.ui.theme.DefaultSeedColor
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,25 +21,21 @@ enum class AppScreen { SETUP, THEATER, PREVIEW }
 
 enum class AppThemeMode { SYSTEM, DARK, LIGHT, AMOLED }
 
-enum class VideoQuality {
-    LOW,    // 720p-ish bitrate
-    MEDIUM,
-    HIGH,
-    ULTRA,
-}
+enum class VideoQuality { LOW, MEDIUM, HIGH, ULTRA }
 
 data class CanvaUiState(
     val screen: AppScreen = AppScreen.SETUP,
     val source: String = DEFAULT_HTML,
     val visible: String = "",
-    val language: Language = Language.XML,
+    val language: Language = Language.HTML,
     val mode: TypeMode = TypeMode.CHAR,
-    val speedCps: Float = 28f,
+    val speedCps: Float = 32f,
     val running: Boolean = false,
     val finished: Boolean = false,
     val recordEnabled: Boolean = false,
     val recording: Boolean = false,
     val themeMode: AppThemeMode = AppThemeMode.DARK,
+    val seedColorArgb: Int = DefaultSeedColor.toArgb(),
     val videoQuality: VideoQuality = VideoQuality.HIGH,
     val fontSize: Float = 15f,
     val status: String? = null,
@@ -74,22 +73,14 @@ class CanvaViewModel : ViewModel() {
 
     fun setSource(s: String) {
         if (_ui.value.running) return
-        val lang = Language.fromFileName(
-            when {
-                s.trimStart().startsWith("<!") || s.contains("<html", true) -> "index.html"
-                s.trimStart().startsWith("{") -> "a.json"
-                s.contains("fun ") && s.contains("(") -> "Main.kt"
-                s.contains("def ") -> "main.py"
-                else -> "file.txt"
-            }
-        )
+        val lang = detectLanguage(s)
         _ui.update {
             it.copy(
                 source = s,
                 visible = "",
                 finished = false,
                 progress = 0f,
-                language = if (it.language == Language.PLAIN) lang else it.language,
+                language = lang,
                 status = null,
             )
         }
@@ -103,29 +94,16 @@ class CanvaViewModel : ViewModel() {
     }
     fun setRecordEnabled(v: Boolean) = _ui.update { it.copy(recordEnabled = v) }
     fun setThemeMode(m: AppThemeMode) = _ui.update { it.copy(themeMode = m) }
+    fun setSeedColor(argb: Int) = _ui.update { it.copy(seedColorArgb = argb) }
     fun setVideoQuality(q: VideoQuality) = _ui.update { it.copy(videoQuality = q) }
     fun setFontSize(v: Float) = _ui.update { it.copy(fontSize = v.coerceIn(11f, 28f)) }
 
-    fun onRecordingStarted() {
-        _ui.update { it.copy(recording = true, status = "Recording app…") }
+    fun onRecordingStarted() = _ui.update { it.copy(recording = true) }
+    fun onRecordingDenied() = _ui.update {
+        it.copy(recordEnabled = false, recording = false, status = "Recording permission denied")
     }
+    fun onRecordingStopped() = _ui.update { it.copy(recording = false) }
 
-    fun onRecordingDenied() {
-        _ui.update {
-            it.copy(recordEnabled = false, recording = false, status = "Recording permission denied")
-        }
-    }
-
-    fun onRecordingStopped() {
-        _ui.update {
-            it.copy(
-                recording = false,
-                status = "Recording saved (Movies/CodeCanva)",
-            )
-        }
-    }
-
-    /** Enter full-screen theater and begin type-out. */
     fun startTyping() {
         if (_ui.value.running) return
         val source = _ui.value.source
@@ -141,7 +119,7 @@ class CanvaViewModel : ViewModel() {
                 finished = false,
                 visible = "",
                 progress = 0f,
-                status = "Typing…",
+                status = null,
             )
         }
         job = viewModelScope.launch {
@@ -150,9 +128,7 @@ class CanvaViewModel : ViewModel() {
                 TypeMode.WORD -> tokenizeWords(source)
                 TypeMode.LINE -> {
                     val lines = source.split("\n")
-                    lines.mapIndexed { i, line ->
-                        if (i < lines.lastIndex) line + "\n" else line
-                    }
+                    lines.mapIndexed { i, line -> if (i < lines.lastIndex) line + "\n" else line }
                 }
             }
             val total = units.size.coerceAtLeast(1)
@@ -162,29 +138,14 @@ class CanvaViewModel : ViewModel() {
                 val d = (1000f / _ui.value.speedCps).toLong().coerceIn(8L, 400L)
                 acc.append(unit)
                 _ui.update {
-                    it.copy(
-                        visible = acc.toString(),
-                        progress = (index + 1).toFloat() / total,
-                    )
+                    it.copy(visible = acc.toString(), progress = (index + 1).toFloat() / total)
                 }
                 delay(if (_ui.value.mode == TypeMode.CHAR) d else d * unit.length.coerceAtLeast(1))
             }
             _ui.update {
-                it.copy(
-                    running = false,
-                    finished = true,
-                    visible = source,
-                    progress = 1f,
-                    status = "Done — open Preview or go back",
-                )
+                it.copy(running = false, finished = true, visible = source, progress = 1f)
             }
         }
-    }
-
-    fun pauseTyping() {
-        job?.cancel()
-        job = null
-        _ui.update { it.copy(running = false, status = "Paused") }
     }
 
     fun openPreview() {
@@ -192,32 +153,21 @@ class CanvaViewModel : ViewModel() {
         _ui.update { it.copy(screen = AppScreen.PREVIEW) }
     }
 
+    /** Theater back: stop type-out, leave theater (caller stops recording). */
     fun backFromTheater() {
         job?.cancel()
         job = null
         _ui.update {
-            it.copy(
-                screen = AppScreen.SETUP,
-                running = false,
-                // keep visible/finished so user sees result on setup if wanted
-            )
+            it.copy(screen = AppScreen.SETUP, running = false)
         }
     }
 
     fun backFromPreview() {
-        // Return to theater if we were watching, else setup
-        val target = if (_ui.value.visible.isNotEmpty() || _ui.value.finished) {
-            AppScreen.THEATER
-        } else {
-            AppScreen.SETUP
+        _ui.update {
+            it.copy(
+                screen = if (it.visible.isNotEmpty() || it.finished) AppScreen.THEATER else AppScreen.SETUP,
+            )
         }
-        _ui.update { it.copy(screen = target) }
-    }
-
-    fun goSetup() {
-        job?.cancel()
-        job = null
-        _ui.update { it.copy(screen = AppScreen.SETUP, running = false) }
     }
 
     fun reset() {
@@ -233,6 +183,20 @@ class CanvaViewModel : ViewModel() {
                 status = null,
                 recording = false,
             )
+        }
+    }
+
+    private fun detectLanguage(s: String): Language {
+        val t = s.trimStart()
+        return when {
+            t.startsWith("<!DOCTYPE", true) || t.startsWith("<html", true) ||
+                (t.startsWith("<") && (s.contains("<html", true) || s.contains("<style", true) || s.contains("<script", true))) ->
+                Language.HTML
+            t.startsWith("{") || t.startsWith("[") -> Language.JSON
+            s.contains("fun ") && s.contains("(") -> Language.KOTLIN
+            s.contains("def ") -> Language.PYTHON
+            s.contains("function ") || s.contains("const ") || s.contains("=>") -> Language.JAVASCRIPT
+            else -> _ui.value.language
         }
     }
 
