@@ -12,8 +12,8 @@ android {
         applicationId = "com.endroid.codecanva"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "1.2.3"
+        versionCode = 7
+        versionName = "1.2.4"
         resourceConfigurations += listOf("en")
     }
 

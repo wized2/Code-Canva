@@ -6,7 +6,6 @@ import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
-import kotlinx.coroutines.delay
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -45,18 +44,13 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -284,9 +278,6 @@ private fun TheaterScreen(
     val scheme = MaterialTheme.colorScheme
     val text = state.visible
     val isDark = scheme.background.luminance() < 0.5f
-    val highlighted = remember(text, state.language, isDark) {
-        SyntaxHighlighter.highlight(text, state.language, isDark)
-    }
     val mono = TextStyle(
         fontFamily = FontFamily.Monospace,
         fontSize = state.fontSize.sp,
@@ -294,50 +285,26 @@ private fun TheaterScreen(
         lineHeight = (state.fontSize * 1.5f).sp,
     )
     val vScroll = rememberScrollState()
-    val hScroll = rememberScrollState()
-    val gutterScroll = rememberScrollState()
-    val textMeasurer = rememberTextMeasurer()
-    var viewportWidthPx by remember { mutableIntStateOf(0) }
-    var codeAreaHeightPx by remember { mutableIntStateOf(0) }
+    // Only the *active* (last) line uses horizontal scroll — independent of earlier long lines
+    val activeHScroll = rememberScrollState()
 
-    /*
-     * Scroll the *current line* into view by measured pixel width vs viewport.
-     * Independent of whether an earlier line was longer (that was the 1.2.2 bug).
-     * Newline → smooth reset to x=0.
-     */
-    LaunchedEffect(text, viewportWidthPx, state.fontSize, hScroll.maxValue) {
-        // Vertical follow latest line
-        vScroll.animateScrollTo(vScroll.maxValue)
-        gutterScroll.scrollTo(vScroll.value)
+    val splitLines = remember(text) { text.split("\n") }
+    // If text ends with \n, last split element is "" (new empty line being started)
+    val activeIndex = splitLines.lastIndex
+    val activeLine = splitLines.getOrElse(activeIndex) { "" }
 
-        if (text.isEmpty() || viewportWidthPx <= 0) {
-            hScroll.animateScrollTo(0)
-            return@LaunchedEffect
+    // Pin vertical to bottom whenever text grows
+    LaunchedEffect(text, vScroll.maxValue) {
+        vScroll.scrollTo(vScroll.maxValue)
+    }
+    // Active line: always show its end (works for every long line, not only the longest in file)
+    LaunchedEffect(activeLine, activeHScroll.maxValue) {
+        if (activeLine.isEmpty()) {
+            activeHScroll.scrollTo(0)
+        } else {
+            // Instant — typing cancels animateScrollTo every character
+            activeHScroll.scrollTo(activeHScroll.maxValue)
         }
-        if (text.endsWith("\n")) {
-            hScroll.animateScrollTo(0)
-            return@LaunchedEffect
-        }
-
-        val currentLine = text.substringAfterLast('\n')
-        val lineWidth = textMeasurer.measure(
-            text = currentLine,
-            style = mono,
-            softWrap = false,
-            maxLines = 1,
-        ).size.width
-
-        // Keep ~48px padding past the caret end so the last chars aren't glued to the edge
-        val target = (lineWidth - viewportWidthPx + 48).coerceAtLeast(0)
-
-        // Layout may lag one frame behind text growth — wait until maxValue can reach target
-        var frames = 0
-        while (hScroll.maxValue < target && frames < 8) {
-            delay(8)
-            frames++
-        }
-        val dest = target.coerceAtMost(hScroll.maxValue.coerceAtLeast(0))
-        hScroll.animateScrollTo(dest)
     }
 
     Column(
@@ -393,39 +360,56 @@ private fun TheaterScreen(
             Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .background(scheme.surfaceVariant.copy(alpha = 0.2f)),
+                .background(scheme.surfaceVariant.copy(alpha = 0.2f))
+                .padding(top = 14.dp, end = 14.dp, bottom = 14.dp),
         ) {
-            val lines = if (text.isEmpty()) 1 else text.count { it == '\n' } + 1
-            val gutter = remember(lines) { (1..lines).joinToString("\n") { it.toString() } }
-            Text(
-                gutter,
-                style = mono.copy(
-                    color = scheme.onSurfaceVariant.copy(alpha = 0.4f),
-                    fontSize = (state.fontSize * 0.85f).sp,
-                ),
-                modifier = Modifier
-                    .padding(start = 10.dp, top = 14.dp, end = 8.dp)
-                    .verticalScroll(gutterScroll, enabled = false),
-            )
-            // Viewport Box reports visible width; Text content may be wider (no wrap)
-            Box(
+            // Gutter
+            Column(
+                Modifier
+                    .padding(start = 10.dp, end = 8.dp)
+                    .verticalScroll(vScroll, enabled = false),
+            ) {
+                for (i in splitLines.indices) {
+                    Text(
+                        text = "${i + 1}",
+                        style = mono.copy(
+                            color = scheme.onSurfaceVariant.copy(alpha = 0.4f),
+                            fontSize = (state.fontSize * 0.85f).sp,
+                        ),
+                        maxLines = 1,
+                    )
+                }
+            }
+            // Code: one Text row per line — only active line auto-scrolls horizontally
+            Column(
                 Modifier
                     .weight(1f)
-                    .padding(top = 14.dp, end = 14.dp, bottom = 14.dp)
-                    .onSizeChanged {
-                        viewportWidthPx = it.width
-                        codeAreaHeightPx = it.height
-                    },
+                    .verticalScroll(vScroll),
             ) {
-                Text(
-                    text = highlighted,
-                    style = mono,
-                    softWrap = false,
-                    maxLines = Int.MAX_VALUE,
-                    modifier = Modifier
-                        .horizontalScroll(hScroll)
-                        .verticalScroll(vScroll),
-                )
+                splitLines.forEachIndexed { index, line ->
+                    val lineHighlight = remember(line, state.language, isDark) {
+                        SyntaxHighlighter.highlight(line, state.language, isDark)
+                    }
+                    if (index == activeIndex) {
+                        Text(
+                            text = lineHighlight,
+                            style = mono,
+                            softWrap = false,
+                            maxLines = 1,
+                            modifier = Modifier.horizontalScroll(activeHScroll),
+                        )
+                    } else {
+                        // Finished lines: show from the start, clip overflow (no global h-scroll)
+                        Text(
+                            text = lineHighlight,
+                            style = mono,
+                            softWrap = false,
+                            maxLines = 1,
+                            overflow = TextOverflow.Clip,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
             }
         }
     }
