@@ -356,57 +356,48 @@ private fun TheaterScreen(
                 modifier = Modifier.fillMaxWidth().height(2.dp),
             )
         }
-        Row(
+        Column(
             Modifier
                 .weight(1f)
                 .fillMaxWidth()
                 .background(scheme.surfaceVariant.copy(alpha = 0.2f))
-                .padding(top = 14.dp, end = 14.dp, bottom = 14.dp),
+                .padding(top = 14.dp, end = 14.dp, bottom = 14.dp)
+                .verticalScroll(vScroll),
         ) {
-            // Gutter
-            Column(
-                Modifier
-                    .padding(start = 10.dp, end = 8.dp)
-                    .verticalScroll(vScroll, enabled = false),
-            ) {
-                for (i in splitLines.indices) {
+            splitLines.forEachIndexed { index, line ->
+                val lineHighlight = remember(line, state.language, isDark) {
+                    SyntaxHighlighter.highlight(line, state.language, isDark)
+                }
+                Row(Modifier.fillMaxWidth()) {
                     Text(
-                        text = "${i + 1}",
+                        text = "${index + 1}",
                         style = mono.copy(
                             color = scheme.onSurfaceVariant.copy(alpha = 0.4f),
                             fontSize = (state.fontSize * 0.85f).sp,
                         ),
                         maxLines = 1,
+                        modifier = Modifier
+                            .padding(start = 10.dp, end = 8.dp)
+                            .width(28.dp),
                     )
-                }
-            }
-            // Code: one Text row per line — only active line auto-scrolls horizontally
-            Column(
-                Modifier
-                    .weight(1f)
-                    .verticalScroll(vScroll),
-            ) {
-                splitLines.forEachIndexed { index, line ->
-                    val lineHighlight = remember(line, state.language, isDark) {
-                        SyntaxHighlighter.highlight(line, state.language, isDark)
-                    }
                     if (index == activeIndex) {
                         Text(
                             text = lineHighlight,
                             style = mono,
                             softWrap = false,
                             maxLines = 1,
-                            modifier = Modifier.horizontalScroll(activeHScroll),
+                            modifier = Modifier
+                                .weight(1f)
+                                .horizontalScroll(activeHScroll),
                         )
                     } else {
-                        // Finished lines: show from the start, clip overflow (no global h-scroll)
                         Text(
                             text = lineHighlight,
                             style = mono,
                             softWrap = false,
                             maxLines = 1,
                             overflow = TextOverflow.Clip,
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.weight(1f),
                         )
                     }
                 }
