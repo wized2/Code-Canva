@@ -11,6 +11,7 @@ import android.view.ViewGroup
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.VideoView
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -43,6 +44,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -61,16 +63,17 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
@@ -88,10 +91,14 @@ import com.endroid.codecanva.R
 import com.endroid.codecanva.editor.Language
 import com.endroid.codecanva.editor.SyntaxHighlighter
 import com.endroid.codecanva.ui.theme.PresetSeedColors
+import com.endroid.codecanva.video.VideoTrimmer
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun CodeCanvaApp(
@@ -120,6 +127,11 @@ fun CodeCanvaApp(
     onFontSize: (Float) -> Unit,
     onEditorFont: (EditorFont) -> Unit,
     onLibraryChanged: () -> Unit,
+    onOpenEditor: (Uri, String, Long) -> Unit,
+    onTrimStart: (Long) -> Unit,
+    onTrimEnd: (Long) -> Unit,
+    onCloseEditor: () -> Unit,
+    onEditBusy: (Boolean, String?) -> Unit,
 ) {
     when (state.screen) {
         AppScreen.SETUP -> SetupScreen(
@@ -144,14 +156,15 @@ fun CodeCanvaApp(
             onFontSize = onFontSize,
             onEditorFont = onEditorFont,
             onLibraryChanged = onLibraryChanged,
+            onOpenEditor = onOpenEditor,
         )
         AppScreen.INTRO -> {
             BackHandler { onBackCard() }
-            AnimatedCardScreen(config = state.intro, label = "Intro", onBack = onBackCard, onSkip = onSkipCard)
+            AnimatedCardScreen(config = state.intro, label = "Intro")
         }
         AppScreen.OUTRO -> {
             BackHandler { onBackCard() }
-            AnimatedCardScreen(config = state.outro, label = "Outro", onBack = onBackCard, onSkip = onSkipCard)
+            AnimatedCardScreen(config = state.outro, label = "Outro")
         }
         AppScreen.THEATER -> {
             BackHandler { onBackTheater() }
@@ -160,6 +173,17 @@ fun CodeCanvaApp(
         AppScreen.PREVIEW -> {
             BackHandler { onBackPreview() }
             PreviewScreen(html = state.source, onBack = onBackPreview)
+        }
+        AppScreen.EDITOR -> {
+            BackHandler { onCloseEditor() }
+            VideoEditorScreen(
+                state = state,
+                onTrimStart = onTrimStart,
+                onTrimEnd = onTrimEnd,
+                onClose = onCloseEditor,
+                onBusy = onEditBusy,
+                onLibraryChanged = onLibraryChanged,
+            )
         }
     }
 }
@@ -188,6 +212,7 @@ private fun SetupScreen(
     onFontSize: (Float) -> Unit,
     onEditorFont: (EditorFont) -> Unit,
     onLibraryChanged: () -> Unit,
+    onOpenEditor: (Uri, String, Long) -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
     val tabs = listOf("Script", "Cards", "Library")
@@ -198,7 +223,7 @@ private fun SetupScreen(
                     Column {
                         Text("Code Canva", fontWeight = FontWeight.SemiBold)
                         Text(
-                            "Shorts-ready type-out studio",
+                            "Shorts type-out studio",
                             style = MaterialTheme.typography.labelSmall,
                             color = scheme.onSurfaceVariant,
                         )
@@ -211,22 +236,17 @@ private fun SetupScreen(
         Column(Modifier.fillMaxSize().padding(padding)) {
             TabRow(selectedTabIndex = state.setupTab) {
                 tabs.forEachIndexed { i, title ->
-                    Tab(
-                        selected = state.setupTab == i,
-                        onClick = { onSetupTab(i) },
-                        text = { Text(title) },
-                    )
+                    Tab(selected = state.setupTab == i, onClick = { onSetupTab(i) }, text = { Text(title) })
                 }
             }
             when (state.setupTab) {
                 0 -> ScriptTab(
                     state, onSourceChange, onLanguageChange, onSpeedChange, onModeChange,
                     onHumanTyping, onShowCursor, onSoundEnabled, onRecordToggle, onThemeMode,
-                    onSeedColor, onVideoQuality, onStart, onOpenPreview, onReset, onFontSize,
-                    onEditorFont,
+                    onSeedColor, onVideoQuality, onStart, onOpenPreview, onReset, onFontSize, onEditorFont,
                 )
                 1 -> CardsTab(state, onIntro, onOutro)
-                else -> LibraryTab(state.libraryRefresh, onLibraryChanged)
+                else -> LibraryTab(state.libraryRefresh, onLibraryChanged, onOpenEditor)
             }
         }
     }
@@ -253,15 +273,13 @@ private fun ScriptTab(
     onEditorFont: (EditorFont) -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
-    Box(Modifier.fillMaxSize()) {
-        FloatingShapesBackground()
-        Column(
-            Modifier
-                .fillMaxSize()
-                .padding(horizontal = 14.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(horizontal = 14.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
         SectionLabel("Appearance")
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             AppThemeMode.entries.forEach { m ->
@@ -282,7 +300,7 @@ private fun ScriptTab(
             }
         }
 
-        SectionLabel("Typing feel")
+        SectionLabel("Typing")
         Text("Speed  ${state.speedCps.toInt()}/s", style = MaterialTheme.typography.labelMedium)
         Slider(value = state.speedCps, onValueChange = onSpeedChange, valueRange = 8f..80f)
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -290,50 +308,25 @@ private fun ScriptTab(
                 FilterChip(selected = state.mode == m, onClick = { onModeChange(m) }, label = { Text(m.name.lowercase().replaceFirstChar { it.uppercase() }) })
             }
         }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Human typing")
-                Text("Jitter + pauses on punctuation", style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
-            }
-            Switch(checked = state.humanTyping, onCheckedChange = onHumanTyping)
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Blinking cursor", modifier = Modifier.weight(1f))
-            Switch(checked = state.showCursor, onCheckedChange = onShowCursor)
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Typing sounds")
-                Text("Soft clicks while typing", style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
-            }
-            Switch(checked = state.soundEnabled, onCheckedChange = onSoundEnabled)
-        }
+        SettingSwitch("Human typing", "Jitter & pauses", state.humanTyping, onHumanTyping)
+        SettingSwitch("Blinking cursor", null, state.showCursor, onShowCursor)
+        SettingSwitch("Typing sounds", "Soft clicks", state.soundEnabled, onSoundEnabled)
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(Language.HTML, Language.KOTLIN, Language.JAVASCRIPT, Language.PYTHON, Language.JSON, Language.PLAIN).forEach { lang ->
                 FilterChip(selected = state.language == lang, onClick = { onLanguageChange(lang) }, label = { Text(lang.displayName) })
             }
         }
-        Text("Font", style = MaterialTheme.typography.labelMedium)
+        Text("Code font", style = MaterialTheme.typography.labelMedium)
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             EditorFont.entries.forEach { f ->
-                FilterChip(
-                    selected = state.editorFont == f,
-                    onClick = { onEditorFont(f) },
-                    label = { Text(f.name.lowercase().replaceFirstChar { it.uppercase() }) },
-                )
+                FilterChip(selected = state.editorFont == f, onClick = { onEditorFont(f) }, label = { Text(f.name.lowercase().replaceFirstChar { it.uppercase() }) })
             }
         }
         Text("Font size", style = MaterialTheme.typography.labelMedium)
         Slider(value = state.fontSize, onValueChange = onFontSize, valueRange = 12f..22f)
 
         SectionLabel("Recording")
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Record after Start")
-                Text("Captures intro → code → outro", style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
-            }
-            Switch(checked = state.recordEnabled, onCheckedChange = onRecordToggle)
-        }
+        SettingSwitch("Record after Start", "Starts after a short delay (no setup UI)", state.recordEnabled, onRecordToggle)
         if (state.recordEnabled) {
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 VideoQuality.entries.forEach { q ->
@@ -357,30 +350,39 @@ private fun ScriptTab(
             OutlinedButton(onClick = onReset, shape = RoundedCornerShape(14.dp)) { Text("Reset") }
         }
         Spacer(Modifier.height(28.dp))
+    }
+}
+
+@Composable
+private fun SettingSwitch(title: String, subtitle: String?, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title)
+            if (subtitle != null) {
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
+        Switch(checked = checked, onCheckedChange = onChange)
     }
 }
 
 @Composable
 private fun CardsTab(state: CanvaUiState, onIntro: (CardConfig) -> Unit, onOutro: (CardConfig) -> Unit) {
-    Box(Modifier.fillMaxSize()) {
-        FloatingShapesBackground(subtle = true)
-        Column(
-            Modifier
-                .fillMaxSize()
-                .padding(14.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
-                "Start card on Start. End card after leaving Preview, then recording stops.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            CardEditor(title = "Start screen (intro)", config = state.intro, onChange = onIntro)
-            CardEditor(title = "End screen (outro)", config = state.outro, onChange = onOutro)
-            Spacer(Modifier.height(24.dp))
-        }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(14.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            "Start card on Start. End card after leaving Preview — then recording stops.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        CardEditor(title = "Start screen (intro)", config = state.intro, onChange = onIntro)
+        CardEditor(title = "End screen (outro)", config = state.outro, onChange = onOutro)
+        Spacer(Modifier.height(24.dp))
     }
 }
 
@@ -395,34 +397,22 @@ private fun CardEditor(title: String, config: CardConfig, onChange: (CardConfig)
                 Text(title, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 Switch(checked = config.enabled, onCheckedChange = { onChange(config.copy(enabled = it)) })
             }
-            OutlinedTextField(
-                value = config.title,
-                onValueChange = { onChange(config.copy(title = it)) },
-                label = { Text("Title") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-            )
-            OutlinedTextField(
-                value = config.subtitle,
-                onValueChange = { onChange(config.copy(subtitle = it)) },
-                label = { Text("Subtitle") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-            )
+            OutlinedTextField(value = config.title, onValueChange = { onChange(config.copy(title = it)) }, label = { Text("Title") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+            OutlinedTextField(value = config.subtitle, onValueChange = { onChange(config.copy(subtitle = it)) }, label = { Text("Subtitle") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
             Text("Duration ${"%.1f".format(config.durationSec)}s", style = MaterialTheme.typography.labelMedium)
-            Slider(
-                value = config.durationSec,
-                onValueChange = { onChange(config.copy(durationSec = it)) },
-                valueRange = 1.5f..8f,
-            )
+            Slider(value = config.durationSec, onValueChange = { onChange(config.copy(durationSec = it)) }, valueRange = 1.5f..8f)
+            Text("Title font", style = MaterialTheme.typography.labelMedium)
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                EditorFont.entries.forEach { f ->
+                    FilterChip(selected = config.titleFont == f, onClick = { onChange(config.copy(titleFont = f)) }, label = { Text(f.name.lowercase().replaceFirstChar { it.uppercase() }) })
+                }
+            }
+            Text("Title size ${config.titleSizeSp.toInt()}sp", style = MaterialTheme.typography.labelMedium)
+            Slider(value = config.titleSizeSp, onValueChange = { onChange(config.copy(titleSizeSp = it)) }, valueRange = 18f..40f)
             Text("Animation", style = MaterialTheme.typography.labelMedium)
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 CardAnim.entries.forEach { a ->
-                    FilterChip(
-                        selected = config.anim == a,
-                        onClick = { onChange(config.copy(anim = a)) },
-                        label = { Text(a.name.lowercase().replace('_', ' ').replaceFirstChar { it.uppercase() }) },
-                    )
+                    FilterChip(selected = config.anim == a, onClick = { onChange(config.copy(anim = a)) }, label = { Text(a.name.lowercase().replace('_', ' ').replaceFirstChar { it.uppercase() }) })
                 }
             }
         }
@@ -432,20 +422,21 @@ private fun CardEditor(title: String, config: CardConfig, onChange: (CardConfig)
 data class LibraryItem(val id: Long, val name: String, val uri: Uri, val dateMs: Long, val sizeBytes: Long)
 
 @Composable
-private fun LibraryTab(refreshKey: Int, onLibraryChanged: () -> Unit) {
+private fun LibraryTab(
+    refreshKey: Int,
+    onLibraryChanged: () -> Unit,
+    onOpenEditor: (Uri, String, Long) -> Unit,
+) {
     val context = LocalContext.current
     var items by remember(refreshKey) { mutableStateOf(loadLibrary(context)) }
     LaunchedEffect(refreshKey) { items = loadLibrary(context) }
 
     Column(
-        Modifier
-            .fillMaxSize()
-            .padding(14.dp)
-            .verticalScroll(rememberScrollState()),
+        Modifier.fillMaxSize().padding(14.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(
-            "Your recordings. Open in the system editor to trim/cut, or share to YouTube.",
+            "Open the editor to trim start/end. Share when ready.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -459,25 +450,20 @@ private fun LibraryTab(refreshKey: Int, onLibraryChanged: () -> Unit) {
             ) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(item.name, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(
-                        formatMeta(item),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(formatMeta(item), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = {
+                            val dur = VideoTrimmer.durationMs(context, item.uri)
+                            onOpenEditor(item.uri, item.name, dur)
+                        }) { Text("Edit") }
                         OutlinedButton(onClick = { openVideo(context, item.uri) }) { Text("Open") }
                         OutlinedButton(onClick = { shareVideo(context, item.uri) }) { Text("Share") }
                         OutlinedButton(onClick = {
-                            try {
-                                context.contentResolver.delete(item.uri, null, null)
-                            } catch (_: Exception) {
-                            }
-                            // also try app files dir
+                            try { context.contentResolver.delete(item.uri, null, null) } catch (_: Exception) {}
                             try {
                                 val dir = File(context.getExternalFilesDir(Environment.DIRECTORY_MOVIES), "CodeCanva")
                                 dir.listFiles()?.filter { it.name == item.name }?.forEach { it.delete() }
-                            } catch (_: Exception) {
-                            }
+                            } catch (_: Exception) {}
                             onLibraryChanged()
                             items = loadLibrary(context)
                         }) { Text("Delete") }
@@ -489,18 +475,130 @@ private fun LibraryTab(refreshKey: Int, onLibraryChanged: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun VideoEditorScreen(
+    state: CanvaUiState,
+    onTrimStart: (Long) -> Unit,
+    onTrimEnd: (Long) -> Unit,
+    onClose: () -> Unit,
+    onBusy: (Boolean, String?) -> Unit,
+    onLibraryChanged: () -> Unit,
+) {
+    val context = LocalContext.current
+    val uri = state.editUri
+    val scheme = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
+    var videoView by remember { mutableStateOf<VideoView?>(null) }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(state.editName, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                navigationIcon = {
+                    IconButton(onClick = onClose) {
+                        Icon(painterResource(R.drawable.ic_back), contentDescription = "Back", tint = scheme.onSurface)
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = scheme.surface),
+            )
+        },
+    ) { padding ->
+        Column(
+            Modifier.fillMaxSize().padding(padding).padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            if (uri != null) {
+                AndroidView(
+                    factory = { ctx ->
+                        VideoView(ctx).also { vv ->
+                            videoView = vv
+                            vv.setVideoURI(uri)
+                            vv.setOnPreparedListener { mp ->
+                                mp.isLooping = false
+                                vv.seekTo(state.trimStartMs.toInt())
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().height(220.dp).clip(RoundedCornerShape(12.dp)).background(Color.Black),
+                )
+            }
+            val dur = state.editDurationMs.coerceAtLeast(1L).toFloat()
+            Text("Start  ${formatMs(state.trimStartMs)}", style = MaterialTheme.typography.labelMedium)
+            Slider(
+                value = state.trimStartMs.toFloat(),
+                onValueChange = { onTrimStart(it.toLong()) },
+                valueRange = 0f..(state.trimEndMs - 100f).coerceAtLeast(0f),
+            )
+            Text("End  ${formatMs(state.trimEndMs)}", style = MaterialTheme.typography.labelMedium)
+            Slider(
+                value = state.trimEndMs.toFloat(),
+                onValueChange = { onTrimEnd(it.toLong()) },
+                valueRange = (state.trimStartMs + 100f)..dur,
+            )
+            Text(
+                "Clip length ${formatMs(state.trimEndMs - state.trimStartMs)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(onClick = {
+                    videoView?.seekTo(state.trimStartMs.toInt())
+                    videoView?.start()
+                }) { Text("Play trim") }
+                OutlinedButton(onClick = { videoView?.pause() }) { Text("Pause") }
+            }
+            if (state.editBusy) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                    Text(state.editStatus ?: "Saving…")
+                }
+            } else {
+                state.editStatus?.let { Text(it, color = if (it.startsWith("Saved")) scheme.primary else scheme.error) }
+            }
+            Button(
+                onClick = {
+                    if (uri == null || state.editBusy) return@Button
+                    onBusy(true, "Trimming…")
+                    scope.launch {
+                        val outDir = File(context.getExternalFilesDir(Environment.DIRECTORY_MOVIES), "CodeCanva")
+                        outDir.mkdirs()
+                        val outName = state.editName.removeSuffix(".mp4") + "_trim_${System.currentTimeMillis()}.mp4"
+                        val outFile = File(outDir, outName)
+                        val err = withContext(Dispatchers.IO) {
+                            VideoTrimmer.trim(context, uri, outFile, state.trimStartMs, state.trimEndMs)
+                        }
+                        if (err != null) {
+                            onBusy(false, err)
+                        } else {
+                            onBusy(false, "Saved $outName")
+                            onLibraryChanged()
+                        }
+                    }
+                },
+                enabled = !state.editBusy && uri != null,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+            ) { Text("Save trimmed clip") }
+        }
+    }
+}
+
+private fun formatMs(ms: Long): String {
+    val s = (ms / 1000) % 60
+    val m = (ms / 1000) / 60
+    return "%d:%02d".format(m, s)
+}
+
 private fun loadLibrary(context: Context): List<LibraryItem> {
     val out = ArrayList<LibraryItem>()
-    // App-private movies
     try {
         val dir = File(context.getExternalFilesDir(Environment.DIRECTORY_MOVIES), "CodeCanva")
         dir.listFiles()?.filter { it.extension.equals("mp4", true) }?.sortedByDescending { it.lastModified() }?.forEach { f ->
             val uri = FileProvider.getUriForFile(context, context.packageName + ".files", f)
             out.add(LibraryItem(-f.lastModified(), f.name, uri, f.lastModified(), f.length()))
         }
-    } catch (_: Exception) {
-    }
-    // MediaStore Movies/CodeCanva
+    } catch (_: Exception) {}
     try {
         val collection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
         val projection = arrayOf(
@@ -508,11 +606,9 @@ private fun loadLibrary(context: Context): List<LibraryItem> {
             MediaStore.Video.Media.DISPLAY_NAME,
             MediaStore.Video.Media.DATE_ADDED,
             MediaStore.Video.Media.SIZE,
-            MediaStore.Video.Media.RELATIVE_PATH,
         )
         context.contentResolver.query(
-            collection,
-            projection,
+            collection, projection,
             "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?",
             arrayOf("%CodeCanva%"),
             "${MediaStore.Video.Media.DATE_ADDED} DESC",
@@ -522,22 +618,20 @@ private fun loadLibrary(context: Context): List<LibraryItem> {
             val dateCol = c.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_ADDED)
             val sizeCol = c.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE)
             while (c.moveToNext()) {
-                val id = c.getLong(idCol)
                 val name = c.getString(nameCol) ?: "video.mp4"
                 if (out.any { it.name == name }) continue
                 out.add(
                     LibraryItem(
-                        id = id,
+                        id = c.getLong(idCol),
                         name = name,
-                        uri = ContentUris.withAppendedId(collection, id),
+                        uri = ContentUris.withAppendedId(collection, c.getLong(idCol)),
                         dateMs = c.getLong(dateCol) * 1000L,
                         sizeBytes = c.getLong(sizeCol),
                     ),
                 )
             }
         }
-    } catch (_: Exception) {
-    }
+    } catch (_: Exception) {}
     return out.sortedByDescending { it.dateMs }
 }
 
@@ -549,99 +643,65 @@ private fun formatMeta(item: LibraryItem): String {
 
 private fun openVideo(context: Context, uri: Uri) {
     try {
-        val intent = Intent(Intent.ACTION_VIEW).apply {
+        context.startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, "video/mp4")
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        context.startActivity(Intent.createChooser(intent, "Open video"))
-    } catch (_: Exception) {
-    }
+        }, "Open video"))
+    } catch (_: Exception) {}
 }
 
 private fun shareVideo(context: Context, uri: Uri) {
     try {
-        val intent = Intent(Intent.ACTION_SEND).apply {
+        context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
             type = "video/mp4"
             putExtra(Intent.EXTRA_STREAM, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        context.startActivity(Intent.createChooser(intent, "Share video"))
-    } catch (_: Exception) {
-    }
+        }, "Share video"))
+    } catch (_: Exception) {}
 }
 
 @Composable
 private fun SectionLabel(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.titleSmall,
-        fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(top = 8.dp),
-    )
+    Text(text, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp))
 }
 
 @Composable
-private fun AnimatedCardScreen(
-    config: CardConfig,
-    label: String,
-    onBack: () -> Unit,
-    onSkip: () -> Unit,
-) {
+private fun AnimatedCardScreen(config: CardConfig, label: String) {
     val scheme = MaterialTheme.colorScheme
     val progress = remember { androidx.compose.animation.core.Animatable(0f) }
-    LaunchedEffect(config) {
+    LaunchedEffect(config.title, config.durationSec) {
         progress.snapTo(0f)
         progress.animateTo(1f, animationSpec = tween((config.durationSec * 1000).toInt(), easing = FastOutSlowInEasing))
     }
-    val enter by animateFloatAsState(
-        targetValue = 1f,
-        animationSpec = tween(700, easing = FastOutSlowInEasing),
-        label = "enter",
-    )
-    val infinite = rememberInfiniteTransition(label = "pulse")
-    val pulse by infinite.animateFloat(
-        initialValue = 0.96f,
-        targetValue = 1.04f,
-        animationSpec = infiniteRepeatable(tween(1200), RepeatMode.Reverse),
-        label = "pulse",
-    )
+    val enter by animateFloatAsState(1f, tween(700, easing = FastOutSlowInEasing), label = "enter")
+    // Lightweight pulse only when SCALE — avoids extra work for other anims
+    val pulse = if (config.anim == CardAnim.SCALE) {
+        val infinite = rememberInfiniteTransition(label = "pulse")
+        infinite.animateFloat(0.97f, 1.03f, infiniteRepeatable(tween(1400), RepeatMode.Reverse), label = "p").value
+    } else 1f
 
     val scale = when (config.anim) {
-        CardAnim.SCALE -> 0.85f + 0.15f * enter
-        CardAnim.FADE -> 1f
-        CardAnim.SLIDE_UP -> 1f
-        CardAnim.TYPEWRITER -> 1f
+        CardAnim.SCALE -> 0.88f + 0.12f * enter
+        else -> 1f
     }
     val alpha = when (config.anim) {
         CardAnim.FADE, CardAnim.TYPEWRITER -> enter
-        else -> 0.4f + 0.6f * enter
+        else -> 0.5f + 0.5f * enter
     }
-    val translateY = when (config.anim) {
-        CardAnim.SLIDE_UP -> (1f - enter) * 80f
-        else -> 0f
-    }
+    val translateY = if (config.anim == CardAnim.SLIDE_UP) (1f - enter) * 64f else 0f
+    val titleFont = editorFontFamily(config.titleFont)
 
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(scheme.background)
-            .statusBarsPadding(),
-    ) {
+    Box(Modifier.fillMaxSize().background(scheme.background).statusBarsPadding()) {
         FloatingShapesBackground()
-        // subtle progress
-        LinearProgressIndicator(
-            progress = { progress.value },
-            modifier = Modifier.fillMaxWidth().height(3.dp).align(Alignment.TopCenter),
-        )
+        LinearProgressIndicator(progress = { progress.value }, modifier = Modifier.fillMaxWidth().height(3.dp).align(Alignment.TopCenter))
         Column(
             Modifier
                 .fillMaxSize()
                 .padding(28.dp)
                 .graphicsLayer {
                     this.alpha = alpha
-                    scaleX = scale * if (config.anim == CardAnim.SCALE) pulse else 1f
-                    scaleY = scale * if (config.anim == CardAnim.SCALE) pulse else 1f
+                    scaleX = scale * pulse
+                    scaleY = scale * pulse
                     translationY = translateY
                 },
             verticalArrangement = Arrangement.Center,
@@ -654,31 +714,22 @@ private fun AnimatedCardScreen(
                     val n = (config.title.length * enter).toInt().coerceIn(0, config.title.length)
                     config.title.take(n)
                 } else config.title,
-                style = MaterialTheme.typography.headlineMedium,
+                fontFamily = titleFont,
+                fontSize = config.titleSizeSp.sp,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
                 color = scheme.onBackground,
             )
             if (config.subtitle.isNotBlank()) {
                 Spacer(Modifier.height(12.dp))
-                Text(
-                    config.subtitle,
-                    style = MaterialTheme.typography.titleMedium,
-                    textAlign = TextAlign.Center,
-                    color = scheme.onSurfaceVariant,
-                )
+                Text(config.subtitle, fontFamily = titleFont, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center, color = scheme.onSurfaceVariant)
             }
         }
-        // No Skip/Back — timed card for clean Shorts recording
     }
 }
 
 @Composable
-private fun TheaterScreen(
-    state: CanvaUiState,
-    onBack: () -> Unit,
-    onRun: () -> Unit,
-) {
+private fun TheaterScreen(state: CanvaUiState, onBack: () -> Unit, onRun: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
     val text = state.visible
     val isDark = scheme.background.luminance() < 0.5f
@@ -690,38 +741,23 @@ private fun TheaterScreen(
     )
     val vScroll = rememberScrollState()
     val activeHScroll = rememberScrollState()
-
     val splitLines = remember(text) { text.split("\n") }
     val activeIndex = splitLines.lastIndex
     val activeLine = splitLines.getOrElse(activeIndex) { "" }
 
-    val blink = rememberInfiniteTransition(label = "cursor")
-    val cursorAlpha by blink.animateFloat(
-        initialValue = 1f,
-        targetValue = 0f,
-        animationSpec = infiniteRepeatable(tween(530), RepeatMode.Reverse),
-        label = "cursorA",
-    )
+    val cursorAlpha = if (state.showCursor && state.running) {
+        val blink = rememberInfiniteTransition(label = "cursor")
+        blink.animateFloat(1f, 0f, infiniteRepeatable(tween(530), RepeatMode.Reverse), label = "c").value
+    } else 1f
 
-    LaunchedEffect(text, vScroll.maxValue) {
-        vScroll.scrollTo(vScroll.maxValue)
-    }
+    LaunchedEffect(text, vScroll.maxValue) { vScroll.scrollTo(vScroll.maxValue) }
     LaunchedEffect(activeLine, activeHScroll.maxValue) {
-        if (activeLine.isEmpty()) activeHScroll.scrollTo(0)
-        else activeHScroll.scrollTo(activeHScroll.maxValue)
+        if (activeLine.isEmpty()) activeHScroll.scrollTo(0) else activeHScroll.scrollTo(activeHScroll.maxValue)
     }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(scheme.background)
-            .statusBarsPadding(),
-    ) {
+    Column(Modifier.fillMaxSize().background(scheme.background).statusBarsPadding()) {
         Surface(color = scheme.surface, tonalElevation = 1.dp) {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack) {
                     Icon(painterResource(R.drawable.ic_back), contentDescription = "Back", tint = scheme.onSurface)
                 }
@@ -734,10 +770,7 @@ private fun TheaterScreen(
                         Language.JSON -> "data.json"
                         else -> "file.txt"
                     },
-                    modifier = Modifier.weight(1f),
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
                 IconButton(onClick = onRun) {
                     Icon(painterResource(R.drawable.ic_play), contentDescription = "Run preview", tint = scheme.primary)
@@ -762,10 +795,7 @@ private fun TheaterScreen(
                 Row(Modifier.fillMaxWidth()) {
                     Text(
                         text = "${index + 1}",
-                        style = mono.copy(
-                            color = scheme.onSurfaceVariant.copy(alpha = 0.4f),
-                            fontSize = (state.fontSize * 0.85f).sp,
-                        ),
+                        style = mono.copy(color = scheme.onSurfaceVariant.copy(alpha = 0.4f), fontSize = (state.fontSize * 0.85f).sp),
                         maxLines = 1,
                         modifier = Modifier.padding(start = 10.dp, end = 8.dp).width(28.dp),
                     )
@@ -773,25 +803,11 @@ private fun TheaterScreen(
                         Row(Modifier.weight(1f).horizontalScroll(activeHScroll), verticalAlignment = Alignment.CenterVertically) {
                             Text(text = lineHighlight, style = mono, softWrap = false, maxLines = 1)
                             if (state.showCursor && (state.running || !state.finished)) {
-                                Box(
-                                    Modifier
-                                        .padding(start = 1.dp)
-                                        .width(2.dp)
-                                        .height((state.fontSize * 1.2f).dp)
-                                        .alpha(if (state.running) cursorAlpha else 1f)
-                                        .background(scheme.primary),
-                                )
+                                Box(Modifier.padding(start = 1.dp).width(2.dp).height((state.fontSize * 1.2f).dp).alpha(cursorAlpha).background(scheme.primary))
                             }
                         }
                     } else {
-                        Text(
-                            text = lineHighlight,
-                            style = mono,
-                            softWrap = false,
-                            maxLines = 1,
-                            overflow = TextOverflow.Clip,
-                            modifier = Modifier.weight(1f),
-                        )
+                        Text(text = lineHighlight, style = mono, softWrap = false, maxLines = 1, overflow = TextOverflow.Clip, modifier = Modifier.weight(1f))
                     }
                 }
             }
@@ -833,57 +849,16 @@ private fun PreviewScreen(html: String, onBack: () -> Unit) {
     }
 }
 
-
 @Composable
-private fun FloatingShapesBackground(subtle: Boolean = false) {
+private fun FloatingShapesBackground() {
     val scheme = MaterialTheme.colorScheme
     val infinite = rememberInfiniteTransition(label = "shapes")
-    val a by infinite.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(12000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "a",
-    )
-    val b by infinite.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(16000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "b",
-    )
-    val alphaMul = if (subtle) 0.12f else 0.22f
+    val a by infinite.animateFloat(0f, 1f, infiniteRepeatable(tween(14000, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "a")
+    val b by infinite.animateFloat(0f, 1f, infiniteRepeatable(tween(18000, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "b")
     Box(Modifier.fillMaxSize()) {
-        Box(
-            Modifier
-                .size(220.dp)
-                .offset(x = (-40 + 30 * a).dp, y = (80 + 40 * b).dp)
-                .graphicsLayer { rotationZ = a * 25f }
-                .clip(RoundedCornerShape(80.dp))
-                .background(scheme.primary.copy(alpha = alphaMul)),
-        )
-        Box(
-            Modifier
-                .size(160.dp)
-                .align(Alignment.TopEnd)
-                .offset(x = (20 - 20 * b).dp, y = (40 + 30 * a).dp)
-                .clip(CircleShape)
-                .background(scheme.tertiary.copy(alpha = alphaMul * 0.9f)),
-        )
-        Box(
-            Modifier
-                .size(120.dp)
-                .align(Alignment.BottomCenter)
-                .offset(x = (40 * b).dp, y = (-30 - 20 * a).dp)
-                .clip(RoundedCornerShape(40.dp))
-                .background(scheme.secondary.copy(alpha = alphaMul * 0.8f)),
-        )
-        Box(
-            Modifier
-                .size(90.dp)
-                .align(Alignment.CenterEnd)
-                .offset(x = (-10).dp, y = (-60 + 50 * a).dp)
-                .clip(CircleShape)
-                .background(scheme.primaryContainer.copy(alpha = alphaMul)),
-        )
+        Box(Modifier.size(200.dp).offset(x = (-36 + 24 * a).dp, y = (70 + 32 * b).dp).graphicsLayer { rotationZ = a * 20f }.clip(RoundedCornerShape(72.dp)).background(scheme.primary.copy(alpha = 0.18f)))
+        Box(Modifier.size(140.dp).align(Alignment.TopEnd).offset(x = (16 - 16 * b).dp, y = (36 + 24 * a).dp).clip(CircleShape).background(scheme.tertiary.copy(alpha = 0.16f)))
+        Box(Modifier.size(100.dp).align(Alignment.BottomCenter).offset(x = (32 * b).dp, y = (-24 - 16 * a).dp).clip(RoundedCornerShape(36.dp)).background(scheme.secondary.copy(alpha = 0.14f)))
     }
 }
 
@@ -895,16 +870,9 @@ private fun editorFontFamily(font: EditorFont): FontFamily = when (font) {
 }
 
 private fun Color.luminance(): Float {
-    fun c(v: Float): Float =
-        if (v <= 0.03928f) v / 12.92f
-        else Math.pow(((v + 0.055) / 1.055).toDouble(), 2.4).toFloat()
+    fun c(v: Float): Float = if (v <= 0.03928f) v / 12.92f else Math.pow(((v + 0.055) / 1.055).toDouble(), 2.4).toFloat()
     return 0.2126f * c(red) + 0.7152f * c(green) + 0.0722f * c(blue)
 }
 
 private fun Color.toArgbCompat(): Int =
-    android.graphics.Color.argb(
-        (alpha * 255).toInt(),
-        (red * 255).toInt(),
-        (green * 255).toInt(),
-        (blue * 255).toInt(),
-    )
+    android.graphics.Color.argb((alpha * 255).toInt(), (red * 255).toInt(), (green * 255).toInt(), (blue * 255).toInt())

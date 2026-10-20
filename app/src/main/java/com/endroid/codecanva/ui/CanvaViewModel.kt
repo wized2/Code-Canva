@@ -1,5 +1,6 @@
 package com.endroid.codecanva.ui
 
+import android.net.Uri
 import androidx.compose.ui.graphics.toArgb
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -17,7 +18,7 @@ import kotlin.random.Random
 
 enum class TypeMode { CHAR, WORD, LINE }
 
-enum class AppScreen { SETUP, INTRO, THEATER, OUTRO, PREVIEW }
+enum class AppScreen { SETUP, INTRO, THEATER, OUTRO, PREVIEW, EDITOR }
 
 enum class AppThemeMode { SYSTEM, DARK, LIGHT, AMOLED }
 
@@ -26,10 +27,10 @@ enum class VideoQuality { LOW, MEDIUM, HIGH, ULTRA }
 enum class CardAnim { FADE, SCALE, SLIDE_UP, TYPEWRITER }
 
 enum class EditorFont {
-    MONO,      // platform monospace
-    SANS,      // default sans
-    SERIF,     // serif
-    ROUNDED,   // default sans, slightly larger tracking feel
+    MONO,
+    SANS,
+    SERIF,
+    ROUNDED,
 }
 
 data class CardConfig(
@@ -38,6 +39,8 @@ data class CardConfig(
     val subtitle: String = "",
     val durationSec: Float = 3f,
     val anim: CardAnim = CardAnim.SCALE,
+    val titleFont: EditorFont = EditorFont.SANS,
+    val titleSizeSp: Float = 28f,
 )
 
 data class CanvaUiState(
@@ -68,6 +71,8 @@ data class CanvaUiState(
         subtitle = "Watch me code it live",
         durationSec = 3f,
         anim = CardAnim.SCALE,
+        titleFont = EditorFont.SANS,
+        titleSizeSp = 28f,
     ),
     val outro: CardConfig = CardConfig(
         enabled = true,
@@ -75,8 +80,18 @@ data class CanvaUiState(
         subtitle = "Full code link in bio",
         durationSec = 3.5f,
         anim = CardAnim.FADE,
+        titleFont = EditorFont.SANS,
+        titleSizeSp = 28f,
     ),
     val libraryRefresh: Int = 0,
+    // Editor
+    val editUri: Uri? = null,
+    val editName: String = "",
+    val editDurationMs: Long = 0L,
+    val trimStartMs: Long = 0L,
+    val trimEndMs: Long = 0L,
+    val editBusy: Boolean = false,
+    val editStatus: String? = null,
 )
 
 private val DEFAULT_HTML = """
@@ -108,6 +123,7 @@ class CanvaViewModel : ViewModel() {
 
     private var job: Job? = null
     var onKeyClick: (() -> Unit)? = null
+    var onSessionFullyEnded: (() -> Unit)? = null
 
     fun setSetupTab(tab: Int) = _ui.update { it.copy(setupTab = tab.coerceIn(0, 2)) }
     fun setSource(s: String) {
@@ -205,7 +221,6 @@ class CanvaViewModel : ViewModel() {
             _ui.update {
                 it.copy(running = false, finished = true, visible = source, progress = 1f)
             }
-            // Outro runs only after leaving Preview (see leavePreview)
         }
     }
 
@@ -219,9 +234,6 @@ class CanvaViewModel : ViewModel() {
         job = null
         _ui.update { it.copy(screen = AppScreen.SETUP, running = false) }
     }
-
-    /** Leave preview → outro (if enabled) for N seconds, then setup. Caller stops rec after outro. */
-    var onSessionFullyEnded: (() -> Unit)? = null
 
     fun leavePreview() {
         job?.cancel()
@@ -243,7 +255,6 @@ class CanvaViewModel : ViewModel() {
     fun backFromPreview() = leavePreview()
 
     fun backFromCard() {
-        // Intro has no buttons; kept for system back during intro only
         if (_ui.value.screen == AppScreen.INTRO) {
             job?.cancel()
             startTypingInternal()
@@ -256,7 +267,6 @@ class CanvaViewModel : ViewModel() {
     }
 
     fun skipCard() {
-        // No UI skip buttons; system path only
         when (_ui.value.screen) {
             AppScreen.INTRO -> {
                 job?.cancel()
@@ -268,6 +278,49 @@ class CanvaViewModel : ViewModel() {
                 onSessionFullyEnded?.invoke()
             }
             else -> {}
+        }
+    }
+
+    fun openEditor(uri: Uri, name: String, durationMs: Long) {
+        val dur = durationMs.coerceAtLeast(0L)
+        _ui.update {
+            it.copy(
+                screen = AppScreen.EDITOR,
+                editUri = uri,
+                editName = name,
+                editDurationMs = dur,
+                trimStartMs = 0L,
+                trimEndMs = if (dur > 0) dur else 1L,
+                editBusy = false,
+                editStatus = null,
+            )
+        }
+    }
+
+    fun setTrimStart(ms: Long) = _ui.update {
+        val end = it.trimEndMs
+        it.copy(trimStartMs = ms.coerceIn(0L, (end - 100L).coerceAtLeast(0L)))
+    }
+
+    fun setTrimEnd(ms: Long) = _ui.update {
+        val start = it.trimStartMs
+        val max = it.editDurationMs.coerceAtLeast(start + 100L)
+        it.copy(trimEndMs = ms.coerceIn(start + 100L, max))
+    }
+
+    fun setEditBusy(v: Boolean, status: String? = null) =
+        _ui.update { it.copy(editBusy = v, editStatus = status) }
+
+    fun closeEditor() {
+        _ui.update {
+            it.copy(
+                screen = AppScreen.SETUP,
+                setupTab = 2,
+                editUri = null,
+                editBusy = false,
+                editStatus = null,
+                libraryRefresh = it.libraryRefresh + 1,
+            )
         }
     }
 

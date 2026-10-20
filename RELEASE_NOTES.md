@@ -1,7 +1,7 @@
-## Code Canva 1.3.1
+## Code Canva 1.4.0
 
-- Font customization (Mono / Sans / Serif / Rounded)
-- M3 floating shape backgrounds on setup, cards, intro & outro
-- Intro & outro: **no Skip/Back** (clean for recording)
-- **Outro after Preview**: leave preview → outro for N seconds → **auto-stop recording**
-- Clearer Shorts flow: Start → intro → type → Preview → outro → done
+- M3 floating shapes **only on intro & outro**
+- Font + size customization for intro/outro titles
+- Recording starts **~400ms after** intro/theater is shown (setup UI never in video)
+- **Real editor** in Library: preview, set start/end, play trim, save trimmed clip (fast stream-copy)
+- Leaner setup UI (no background animations) for smoother performance

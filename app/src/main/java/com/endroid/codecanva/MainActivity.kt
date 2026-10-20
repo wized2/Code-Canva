@@ -20,6 +20,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.lifecycleScope
 import com.endroid.codecanva.audio.TypingSoundPlayer
 import com.endroid.codecanva.record.RecordingService
 import com.endroid.codecanva.ui.AppScreen
@@ -27,31 +28,40 @@ import com.endroid.codecanva.ui.AppThemeMode
 import com.endroid.codecanva.ui.CanvaViewModel
 import com.endroid.codecanva.ui.CodeCanvaApp
 import com.endroid.codecanva.ui.theme.colorSchemeFromSeed
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
     private val vm: CanvaViewModel by viewModels()
-    private var startAfterProjection = false
+    private var pendingProjectionData: Intent? = null
+    private var pendingProjectionCode: Int = 0
     private val typingSound = TypingSoundPlayer()
 
     private val projectionLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == Activity.RESULT_OK && result.data != null) {
-                val quality = vm.ui.value.videoQuality.name
-                val intent = Intent(this, RecordingService::class.java).apply {
-                    action = RecordingService.ACTION_START
-                    putExtra(RecordingService.EXTRA_RESULT_CODE, result.resultCode)
-                    putExtra(RecordingService.EXTRA_DATA, result.data)
-                    putExtra(RecordingService.EXTRA_QUALITY, quality)
-                }
-                ContextCompat.startForegroundService(this, intent)
-                vm.onRecordingStarted()
-                if (startAfterProjection) {
-                    startAfterProjection = false
-                    vm.beginSession()
+                // Switch UI to intro/theater first so setup is never in the video
+                pendingProjectionCode = result.resultCode
+                pendingProjectionData = result.data
+                vm.beginSession()
+                lifecycleScope.launch {
+                    // Short delay after immersive screen is up
+                    delay(400)
+                    val data = pendingProjectionData ?: return@launch
+                    val quality = vm.ui.value.videoQuality.name
+                    val intent = Intent(this@MainActivity, RecordingService::class.java).apply {
+                        action = RecordingService.ACTION_START
+                        putExtra(RecordingService.EXTRA_RESULT_CODE, pendingProjectionCode)
+                        putExtra(RecordingService.EXTRA_DATA, data)
+                        putExtra(RecordingService.EXTRA_QUALITY, quality)
+                    }
+                    ContextCompat.startForegroundService(this@MainActivity, intent)
+                    vm.onRecordingStarted()
+                    pendingProjectionData = null
                 }
             } else {
-                startAfterProjection = false
+                pendingProjectionData = null
                 vm.onRecordingDenied()
             }
         }
@@ -60,10 +70,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)
         vm.onKeyClick = { typingSound.click() }
-        vm.onSessionFullyEnded = {
-            // Outro finished (or no outro) after preview — stop capture
-            stopRecording()
-        }
+        vm.onSessionFullyEnded = { stopRecording() }
 
         setContent {
             val state by vm.ui.collectAsState()
@@ -82,7 +89,9 @@ class MainActivity : ComponentActivity() {
             }
 
             SideEffect {
-                val immersive = state.screen != AppScreen.SETUP && state.screen != AppScreen.PREVIEW
+                val immersive = state.screen != AppScreen.SETUP &&
+                    state.screen != AppScreen.PREVIEW &&
+                    state.screen != AppScreen.EDITOR
                 val controller = WindowInsetsControllerCompat(window, window.decorView)
                 if (immersive) {
                     WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -121,7 +130,6 @@ class MainActivity : ComponentActivity() {
                     onSetupTab = vm::setSetupTab,
                     onStart = {
                         if (state.recordEnabled && !state.recording) {
-                            startAfterProjection = true
                             requestRecording()
                         } else {
                             vm.beginSession()
@@ -138,7 +146,6 @@ class MainActivity : ComponentActivity() {
                     },
                     onBackPreview = vm::backFromPreview,
                     onBackCard = {
-                        // Leaving intro/outro via back stops session + recording
                         stopRecording()
                         vm.backFromCard()
                     },
@@ -146,6 +153,11 @@ class MainActivity : ComponentActivity() {
                     onFontSize = vm::setFontSize,
                     onEditorFont = vm::setEditorFont,
                     onLibraryChanged = vm::bumpLibrary,
+                    onOpenEditor = vm::openEditor,
+                    onTrimStart = vm::setTrimStart,
+                    onTrimEnd = vm::setTrimEnd,
+                    onCloseEditor = vm::closeEditor,
+                    onEditBusy = vm::setEditBusy,
                 )
             }
         }
