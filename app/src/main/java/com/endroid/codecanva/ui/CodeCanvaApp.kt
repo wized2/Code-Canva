@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -117,6 +118,7 @@ fun CodeCanvaApp(
     onBackCard: () -> Unit,
     onSkipCard: () -> Unit,
     onFontSize: (Float) -> Unit,
+    onEditorFont: (EditorFont) -> Unit,
     onLibraryChanged: () -> Unit,
 ) {
     when (state.screen) {
@@ -140,6 +142,7 @@ fun CodeCanvaApp(
             onOpenPreview = onOpenPreview,
             onReset = onReset,
             onFontSize = onFontSize,
+            onEditorFont = onEditorFont,
             onLibraryChanged = onLibraryChanged,
         )
         AppScreen.INTRO -> {
@@ -183,6 +186,7 @@ private fun SetupScreen(
     onOpenPreview: () -> Unit,
     onReset: () -> Unit,
     onFontSize: (Float) -> Unit,
+    onEditorFont: (EditorFont) -> Unit,
     onLibraryChanged: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
@@ -245,15 +249,18 @@ private fun ScriptTab(
     onOpenPreview: () -> Unit,
     onReset: () -> Unit,
     onFontSize: (Float) -> Unit,
+    onEditorFont: (EditorFont) -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
-    Column(
-        Modifier
-            .fillMaxSize()
-            .padding(horizontal = 14.dp)
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
+    Box(Modifier.fillMaxSize()) {
+        FloatingShapesBackground()
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(horizontal = 14.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
         SectionLabel("Appearance")
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             AppThemeMode.entries.forEach { m ->
@@ -305,6 +312,16 @@ private fun ScriptTab(
                 FilterChip(selected = state.language == lang, onClick = { onLanguageChange(lang) }, label = { Text(lang.displayName) })
             }
         }
+        Text("Font", style = MaterialTheme.typography.labelMedium)
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            EditorFont.entries.forEach { f ->
+                FilterChip(
+                    selected = state.editorFont == f,
+                    onClick = { onEditorFont(f) },
+                    label = { Text(f.name.lowercase().replaceFirstChar { it.uppercase() }) },
+                )
+            }
+        }
         Text("Font size", style = MaterialTheme.typography.labelMedium)
         Slider(value = state.fontSize, onValueChange = onFontSize, valueRange = 12f..22f)
 
@@ -339,11 +356,14 @@ private fun ScriptTab(
             OutlinedButton(onClick = onReset, shape = RoundedCornerShape(14.dp)) { Text("Reset") }
         }
         Spacer(Modifier.height(28.dp))
+        }
     }
 }
 
 @Composable
 private fun CardsTab(state: CanvaUiState, onIntro: (CardConfig) -> Unit, onOutro: (CardConfig) -> Unit) {
+    Box(Modifier.fillMaxSize()) {
+    FloatingShapesBackground(subtle = true)
     Column(
         Modifier
             .fillMaxSize()
@@ -352,7 +372,7 @@ private fun CardsTab(state: CanvaUiState, onIntro: (CardConfig) -> Unit, onOutro
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(
-            "Start & end cards for YouTube Shorts — shown while recording.",
+            "Start card plays on Start. End card plays after you leave Preview, then recording stops.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -606,6 +626,7 @@ private fun AnimatedCardScreen(
             .background(scheme.background)
             .statusBarsPadding(),
     ) {
+        FloatingShapesBackground(subtle = false)
         // subtle progress
         LinearProgressIndicator(
             progress = { progress.value },
@@ -646,15 +667,7 @@ private fun AnimatedCardScreen(
                 )
             }
         }
-        Row(
-            Modifier
-                .align(Alignment.BottomCenter)
-                .padding(20.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            OutlinedButton(onClick = onBack) { Text("Back") }
-            Button(onClick = onSkip) { Text("Skip") }
-        }
+        // No skip/back — auto-timed for clean Shorts recording
     }
 }
 
@@ -668,7 +681,7 @@ private fun TheaterScreen(
     val text = state.visible
     val isDark = scheme.background.luminance() < 0.5f
     val mono = TextStyle(
-        fontFamily = FontFamily.Monospace,
+        fontFamily = editorFontFamily(state.editorFont),
         fontSize = state.fontSize.sp,
         color = scheme.onSurface,
         lineHeight = (state.fontSize * 1.5f).sp,

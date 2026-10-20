@@ -25,6 +25,13 @@ enum class VideoQuality { LOW, MEDIUM, HIGH, ULTRA }
 
 enum class CardAnim { FADE, SCALE, SLIDE_UP, TYPEWRITER }
 
+enum class EditorFont {
+    MONO,      // platform monospace
+    SANS,      // default sans
+    SERIF,     // serif
+    ROUNDED,   // default sans, slightly larger tracking feel
+}
+
 data class CardConfig(
     val enabled: Boolean = true,
     val title: String = "",
@@ -52,6 +59,7 @@ data class CanvaUiState(
     val seedColorArgb: Int = DefaultSeedColor.toArgb(),
     val videoQuality: VideoQuality = VideoQuality.HIGH,
     val fontSize: Float = 15f,
+    val editorFont: EditorFont = EditorFont.MONO,
     val status: String? = null,
     val progress: Float = 0f,
     val intro: CardConfig = CardConfig(
@@ -123,6 +131,7 @@ class CanvaViewModel : ViewModel() {
     fun setSeedColor(argb: Int) = _ui.update { it.copy(seedColorArgb = argb) }
     fun setVideoQuality(q: VideoQuality) = _ui.update { it.copy(videoQuality = q) }
     fun setFontSize(v: Float) = _ui.update { it.copy(fontSize = v.coerceIn(11f, 28f)) }
+    fun setEditorFont(f: EditorFont) = _ui.update { it.copy(editorFont = f) }
     fun setIntro(c: CardConfig) = _ui.update { it.copy(intro = c) }
     fun setOutro(c: CardConfig) = _ui.update { it.copy(outro = c) }
     fun bumpLibrary() = _ui.update { it.copy(libraryRefresh = it.libraryRefresh + 1) }
@@ -196,13 +205,7 @@ class CanvaViewModel : ViewModel() {
             _ui.update {
                 it.copy(running = false, finished = true, visible = source, progress = 1f)
             }
-            val outro = _ui.value.outro
-            if (outro.enabled && outro.title.isNotBlank()) {
-                delay(400)
-                if (!isActive) return@launch
-                _ui.update { it.copy(screen = AppScreen.OUTRO) }
-                delay((outro.durationSec * 1000).toLong().coerceIn(800L, 15_000L))
-            }
+            // Outro runs only after leaving Preview (see leavePreview)
         }
     }
 
@@ -217,25 +220,43 @@ class CanvaViewModel : ViewModel() {
         _ui.update { it.copy(screen = AppScreen.SETUP, running = false) }
     }
 
-    fun backFromPreview() {
-        _ui.update {
-            it.copy(
-                screen = when {
-                    it.finished && it.outro.enabled -> AppScreen.OUTRO
-                    it.visible.isNotEmpty() || it.finished -> AppScreen.THEATER
-                    else -> AppScreen.SETUP
-                },
-            )
+    /** Leave preview → outro (if enabled) for N seconds, then setup. Caller stops rec after outro. */
+    var onSessionFullyEnded: (() -> Unit)? = null
+
+    fun leavePreview() {
+        job?.cancel()
+        val outro = _ui.value.outro
+        if (outro.enabled && outro.title.isNotBlank()) {
+            _ui.update { it.copy(screen = AppScreen.OUTRO) }
+            job = viewModelScope.launch {
+                delay((outro.durationSec * 1000).toLong().coerceIn(800L, 15_000L))
+                if (!isActive) return@launch
+                _ui.update { it.copy(screen = AppScreen.SETUP, running = false) }
+                onSessionFullyEnded?.invoke()
+            }
+        } else {
+            _ui.update { it.copy(screen = AppScreen.SETUP, running = false) }
+            onSessionFullyEnded?.invoke()
         }
     }
 
+    fun backFromPreview() = leavePreview()
+
     fun backFromCard() {
+        // Intro has no buttons; kept for system back during intro only
+        if (_ui.value.screen == AppScreen.INTRO) {
+            job?.cancel()
+            startTypingInternal()
+            return
+        }
         job?.cancel()
         job = null
         _ui.update { it.copy(screen = AppScreen.SETUP, running = false) }
+        onSessionFullyEnded?.invoke()
     }
 
     fun skipCard() {
+        // No UI skip buttons; system path only
         when (_ui.value.screen) {
             AppScreen.INTRO -> {
                 job?.cancel()
@@ -244,6 +265,7 @@ class CanvaViewModel : ViewModel() {
             AppScreen.OUTRO -> {
                 job?.cancel()
                 _ui.update { it.copy(screen = AppScreen.SETUP, running = false) }
+                onSessionFullyEnded?.invoke()
             }
             else -> {}
         }

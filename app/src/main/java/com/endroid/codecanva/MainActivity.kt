@@ -60,6 +60,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)
         vm.onKeyClick = { typingSound.click() }
+        vm.onSessionFullyEnded = {
+            // Outro finished (or no outro) after preview — stop capture
+            stopRecording()
+        }
 
         setContent {
             val state by vm.ui.collectAsState()
@@ -140,6 +144,7 @@ class MainActivity : ComponentActivity() {
                     },
                     onSkipCard = vm::skipCard,
                     onFontSize = vm::setFontSize,
+                    onEditorFont = vm::setEditorFont,
                     onLibraryChanged = vm::bumpLibrary,
                 )
             }
