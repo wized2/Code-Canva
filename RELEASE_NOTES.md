@@ -1,6 +1,9 @@
-## Code Canva 1.2.4
+## Code Canva 1.3.0 — Shorts studio
 
-- **Rewrite theater scroll:** each line is its own row; only the active line horizontal-scrolls to the caret
-- Every long line scrolls (not only the longest in the file)
-- New line always starts from the left
-- Instant scroll (no cancelled animations while typing)
+- **Human typing** with jitter and pauses (toggle)
+- **Blinking cursor** on the active line
+- **Typing sounds** toggle (soft system clicks)
+- **Intro / outro cards** — title, subtitle, duration, animations (fade / scale / slide / typewriter)
+- Session flow: intro → type-out → outro (all recordable)
+- **Library tab** — open, share, delete recordings; trim via system editor
+- Script / Cards / Library tabs for a clear Shorts workflow

@@ -20,6 +20,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.endroid.codecanva.audio.TypingSoundPlayer
 import com.endroid.codecanva.record.RecordingService
 import com.endroid.codecanva.ui.AppScreen
 import com.endroid.codecanva.ui.AppThemeMode
@@ -30,8 +31,8 @@ import com.endroid.codecanva.ui.theme.colorSchemeFromSeed
 class MainActivity : ComponentActivity() {
 
     private val vm: CanvaViewModel by viewModels()
-    /** When true, projection result should start typing after recorder starts. */
     private var startAfterProjection = false
+    private val typingSound = TypingSoundPlayer()
 
     private val projectionLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -47,7 +48,7 @@ class MainActivity : ComponentActivity() {
                 vm.onRecordingStarted()
                 if (startAfterProjection) {
                     startAfterProjection = false
-                    vm.startTyping()
+                    vm.beginSession()
                 }
             } else {
                 startAfterProjection = false
@@ -58,9 +59,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)
+        vm.onKeyClick = { typingSound.click() }
 
         setContent {
             val state by vm.ui.collectAsState()
+            typingSound.setEnabled(state.soundEnabled)
+
             val systemDark = isSystemInDarkTheme()
             val dark = when (state.themeMode) {
                 AppThemeMode.SYSTEM -> systemDark
@@ -74,7 +78,7 @@ class MainActivity : ComponentActivity() {
             }
 
             SideEffect {
-                val immersive = state.screen == AppScreen.THEATER
+                val immersive = state.screen != AppScreen.SETUP && state.screen != AppScreen.PREVIEW
                 val controller = WindowInsetsControllerCompat(window, window.decorView)
                 if (immersive) {
                     WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -98,19 +102,25 @@ class MainActivity : ComponentActivity() {
                     onLanguageChange = vm::setLanguage,
                     onSpeedChange = vm::setSpeedCps,
                     onModeChange = vm::setMode,
-                    onRecordToggle = { enabled ->
-                        // Preference only — does not start capture yet
-                        vm.setRecordEnabled(enabled)
+                    onHumanTyping = vm::setHumanTyping,
+                    onShowCursor = vm::setShowCursor,
+                    onSoundEnabled = { on ->
+                        typingSound.setEnabled(on)
+                        vm.setSoundEnabled(on)
                     },
+                    onRecordToggle = { vm.setRecordEnabled(it) },
                     onThemeMode = vm::setThemeMode,
                     onSeedColor = vm::setSeedColor,
                     onVideoQuality = vm::setVideoQuality,
+                    onIntro = vm::setIntro,
+                    onOutro = vm::setOutro,
+                    onSetupTab = vm::setSetupTab,
                     onStart = {
                         if (state.recordEnabled && !state.recording) {
                             startAfterProjection = true
                             requestRecording()
                         } else {
-                            vm.startTyping()
+                            vm.beginSession()
                         }
                     },
                     onReset = {
@@ -119,12 +129,18 @@ class MainActivity : ComponentActivity() {
                     },
                     onOpenPreview = vm::openPreview,
                     onBackTheater = {
-                        // Stop recording only when leaving theater via Back
                         stopRecording()
                         vm.backFromTheater()
                     },
                     onBackPreview = vm::backFromPreview,
+                    onBackCard = {
+                        // Leaving intro/outro via back stops session + recording
+                        stopRecording()
+                        vm.backFromCard()
+                    },
+                    onSkipCard = vm::skipCard,
                     onFontSize = vm::setFontSize,
+                    onLibraryChanged = vm::bumpLibrary,
                 )
             }
         }
@@ -140,5 +156,10 @@ class MainActivity : ComponentActivity() {
             action = RecordingService.ACTION_STOP
         })
         vm.onRecordingStopped()
+    }
+
+    override fun onDestroy() {
+        typingSound.release()
+        super.onDestroy()
     }
 }
