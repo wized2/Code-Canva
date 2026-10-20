@@ -223,6 +223,7 @@ private fun SetupScreen(
                     state, onSourceChange, onLanguageChange, onSpeedChange, onModeChange,
                     onHumanTyping, onShowCursor, onSoundEnabled, onRecordToggle, onThemeMode,
                     onSeedColor, onVideoQuality, onStart, onOpenPreview, onReset, onFontSize,
+                    onEditorFont,
                 )
                 1 -> CardsTab(state, onIntro, onOutro)
                 else -> LibraryTab(state.libraryRefresh, onLibraryChanged)
@@ -363,22 +364,23 @@ private fun ScriptTab(
 @Composable
 private fun CardsTab(state: CanvaUiState, onIntro: (CardConfig) -> Unit, onOutro: (CardConfig) -> Unit) {
     Box(Modifier.fillMaxSize()) {
-    FloatingShapesBackground(subtle = true)
-    Column(
-        Modifier
-            .fillMaxSize()
-            .padding(14.dp)
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text(
-            "Start card plays on Start. End card plays after you leave Preview, then recording stops.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        CardEditor(title = "Start screen (intro)", config = state.intro, onChange = onIntro)
-        CardEditor(title = "End screen (outro)", config = state.outro, onChange = onOutro)
-        Spacer(Modifier.height(24.dp))
+        FloatingShapesBackground(subtle = true)
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(14.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                "Start card on Start. End card after leaving Preview, then recording stops.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            CardEditor(title = "Start screen (intro)", config = state.intro, onChange = onIntro)
+            CardEditor(title = "End screen (outro)", config = state.outro, onChange = onOutro)
+            Spacer(Modifier.height(24.dp))
+        }
     }
 }
 
@@ -626,7 +628,7 @@ private fun AnimatedCardScreen(
             .background(scheme.background)
             .statusBarsPadding(),
     ) {
-        FloatingShapesBackground(subtle = false)
+        FloatingShapesBackground()
         // subtle progress
         LinearProgressIndicator(
             progress = { progress.value },
@@ -667,7 +669,7 @@ private fun AnimatedCardScreen(
                 )
             }
         }
-        // No skip/back — auto-timed for clean Shorts recording
+        // No Skip/Back — timed card for clean Shorts recording
     }
 }
 
