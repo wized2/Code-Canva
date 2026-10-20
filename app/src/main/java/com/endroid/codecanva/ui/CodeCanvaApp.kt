@@ -833,6 +833,67 @@ private fun PreviewScreen(html: String, onBack: () -> Unit) {
     }
 }
 
+
+@Composable
+private fun FloatingShapesBackground(subtle: Boolean = false) {
+    val scheme = MaterialTheme.colorScheme
+    val infinite = rememberInfiniteTransition(label = "shapes")
+    val a by infinite.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(12000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "a",
+    )
+    val b by infinite.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(16000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "b",
+    )
+    val alphaMul = if (subtle) 0.12f else 0.22f
+    Box(Modifier.fillMaxSize()) {
+        Box(
+            Modifier
+                .size(220.dp)
+                .offset(x = (-40 + 30 * a).dp, y = (80 + 40 * b).dp)
+                .graphicsLayer { rotationZ = a * 25f }
+                .clip(RoundedCornerShape(80.dp))
+                .background(scheme.primary.copy(alpha = alphaMul)),
+        )
+        Box(
+            Modifier
+                .size(160.dp)
+                .align(Alignment.TopEnd)
+                .offset(x = (20 - 20 * b).dp, y = (40 + 30 * a).dp)
+                .clip(CircleShape)
+                .background(scheme.tertiary.copy(alpha = alphaMul * 0.9f)),
+        )
+        Box(
+            Modifier
+                .size(120.dp)
+                .align(Alignment.BottomCenter)
+                .offset(x = (40 * b).dp, y = (-30 - 20 * a).dp)
+                .clip(RoundedCornerShape(40.dp))
+                .background(scheme.secondary.copy(alpha = alphaMul * 0.8f)),
+        )
+        Box(
+            Modifier
+                .size(90.dp)
+                .align(Alignment.CenterEnd)
+                .offset(x = (-10).dp, y = (-60 + 50 * a).dp)
+                .clip(CircleShape)
+                .background(scheme.primaryContainer.copy(alpha = alphaMul)),
+        )
+    }
+}
+
+private fun editorFontFamily(font: EditorFont): FontFamily = when (font) {
+    EditorFont.MONO -> FontFamily.Monospace
+    EditorFont.SANS -> FontFamily.SansSerif
+    EditorFont.SERIF -> FontFamily.Serif
+    EditorFont.ROUNDED -> FontFamily.SansSerif
+}
+
 private fun Color.luminance(): Float {
     fun c(v: Float): Float =
         if (v <= 0.03928f) v / 12.92f
